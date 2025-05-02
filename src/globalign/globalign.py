@@ -22,23 +22,12 @@ if TYPE_CHECKING:
     from numpy.random import Generator
     from numpy.typing import NDArray
 
-VALUE_TYPE = torch.float32
-
 
 # Creates a list of random angles
 def grid_angles(center: int, radius: float, n: int = 32) -> list[float]:
-    angles = []
+    offsets = np.linspace(-radius, radius, num=n, endpoint=radius < 180)
 
-    n_denom = n
-    if radius < 180:
-        n_denom -= 1
-
-    for i in range(n):
-        i_frac = i / n_denom
-        ang = center + (2.0 * i_frac - 1.0) * radius
-        angles.append(ang)
-
-    return angles
+    return (center + offsets).tolist()
 
 
 # Supply a Random number generator (e.g. 'rng = np.random.default_rng(12345)') for reproducible results
@@ -50,27 +39,13 @@ def random_angles(
     n: int = 32,
     rng: Generator | None = None,
 ) -> list[float64 | float]:
-    if rng is None:
-        rng = np.random.default_rng()
+    rng = rng or np.random.default_rng()
+    p = center_prob / np.sum(center_prob) if center_prob is not None else None
 
-    angles = []
+    sampled_centers = rng.choice(np.asarray(centers), size=n, p=p)
+    noise = rng.uniform(-radius, radius, size=n)
 
-    if not isinstance(centers, list):
-        centers = [centers]
-    if center_prob is not None:
-        mass = np.sum(center_prob)
-        p = center_prob / mass
-    else:
-        p = None
-
-    for _ in range(n):
-        c = rng.choice(centers, p=p, replace=True)
-        frac = rng.random()
-        ang = c + (2.0 * frac - 1.0) * radius
-
-        angles.append(ang)
-
-    return angles
+    return (sampled_centers + noise).tolist()
 
 
 ### Helper functions
@@ -93,9 +68,7 @@ def fft_of_levelsets(
     fft_list = []
     for a_start in range(0, Q, packing):
         a_end = np.minimum(a_start + packing, Q)
-        levelsets = []
-        for a in range(a_start, a_end):
-            levelsets.append(float_compare(A, a))
+        levelsets = [float_compare(A, a) for a in range(a_start, a_end)]
         A_cat = torch.cat(levelsets, 0)
         del levelsets
         ffts = setup_fn(A_cat)
@@ -127,15 +100,10 @@ def corr_template_setup(B: torch.Tensor) -> torch.Tensor:
 def corr_apply(
     A: torch.Tensor, B: torch.Tensor, sz: torch.Tensor, do_rounding: bool = True
 ) -> torch.Tensor:
-    C = fftconv(A, B)
-
-    C = ifft(C)
+    C = ifft(fftconv(A, B))
     C = C[: sz[0], : sz[1], : sz[2], : sz[3]]
 
-    if do_rounding:
-        C = torch.round(C)
-
-    return C
+    return torch.round(C) if do_rounding else C
 
 
 def tf_rotate(
@@ -147,50 +115,33 @@ def tf_rotate(
     # Half a pixel offset, since TF.rotate origin is in upper left corner
     center_fixed = [round(x + 0.5) for x in center] if center is not None else center
 
-    return TF.rotate(
-        I,
-        -angle,
-        center=center_fixed,
-        fill=[
-            fill_value,
-        ],
-    )
+    return TF.rotate(I, -angle, center=center_fixed, fill=[fill_value])
 
 
 def create_float_tensor(
-    shape: torch.Tensor, on_gpu: bool, fill_value: float | None = None
+    shape: torch.Tensor | tuple[int, ...], on_gpu: bool, fill_value: float | None = None
 ) -> torch.Tensor:
-    if on_gpu:
-        res = torch.empty(
-            (shape[0], shape[1], shape[2], shape[3]), device="cuda", dtype=torch.float32
-        )
-        if fill_value is not None:
-            res.fill_(fill_value)
-        return res
-    if fill_value is not None:
-        res = np.full(
-            (shape[0], shape[1], shape[2], shape[3]),
-            fill_value=fill_value,
-            dtype="float32",
-        )
-    else:
-        res = np.zeros((shape[0], shape[1], shape[2], shape[3]), dtype="float32")
-    return torch.tensor(res, dtype=torch.float32)
+    device = "cuda" if on_gpu else "cpu"
+
+    # Explicitly convert each tensor element as integer to solve pyright warnings.
+    out_shape = tuple(int(dim) for dim in shape)
+
+    return torch.full(
+        out_shape, device=device, fill_value=fill_value or 0, dtype=torch.float32
+    )
 
 
 def to_tensor(A: torch.Tensor | NDArray, on_gpu: bool = True) -> torch.Tensor:
-    if torch.is_tensor(A):
-        A_tensor = A.cuda(non_blocking=True) if on_gpu else A
-        if A_tensor.ndim == 2:
-            A_tensor = torch.reshape(
-                A_tensor, (1, 1, A_tensor.shape[0], A_tensor.shape[1])
-            )
-        elif A_tensor.ndim == 3:
-            A_tensor = torch.reshape(
-                A_tensor, (1, A_tensor.shape[0], A_tensor.shape[1], A_tensor.shape[2])
-            )
-        return A_tensor
-    return to_tensor(torch.tensor(A, dtype=VALUE_TYPE), on_gpu=on_gpu)
+    if not torch.is_tensor(A):
+        return to_tensor(torch.tensor(A, dtype=torch.float32), on_gpu=on_gpu)
+
+    A_tensor = A.cuda(non_blocking=True) if on_gpu else A
+    if A_tensor.ndim == 2:
+        A_tensor = torch.reshape(A_tensor, (1, 1, *A_tensor.shape[:2]))
+    elif A_tensor.ndim == 3:
+        A_tensor = torch.reshape(A_tensor, (1, *A_tensor.shape[:3]))
+
+    return A_tensor
 
 
 ### End helper functions
@@ -237,10 +188,7 @@ def align_rigid(
     normalize_mi: bool = False,
     on_gpu: bool = True,
     save_maps: bool = False,
-) -> (
-    tuple[list[tuple[NDArray, float, int64, int64, float64, float64]], None]
-    | tuple[list[tuple[NDArray, float64, int64, int64, float64, float64]], None]
-):
+) -> tuple[list, list | None]:
     eps = 1e-7
 
     results = []
@@ -443,10 +391,10 @@ def align_rigid(
     print("------------------------------")
     print(" [MI]   [angle]  [dx] [dy] ")
     cpu_results = []
-    for i in range(len(results)):
-        ang = results[i][0]
-        maxval = results[i][1].cpu().numpy()
-        maxind = results[i][2].cpu().numpy()
+    for item in results:
+        ang = item[0]
+        maxval = item[1].cpu().numpy()
+        maxind = item[2].cpu().numpy()
         sz_x = int(ext_valid_shape[3].numpy())
         y = maxind // sz_x
         x = maxind % sz_x
@@ -466,9 +414,7 @@ def align_rigid(
         print("%.4f %8.3f %4d %4d" % (float(res[0]), res[1], res[2], res[3]))
     print("------------------------------")
     # Return the maximum found
-    if save_maps:
-        return cpu_results, maps
-    return cpu_results, None
+    return (cpu_results, maps) if save_maps else (cpu_results, None)
 
 
 ###
