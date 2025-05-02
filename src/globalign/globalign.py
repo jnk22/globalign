@@ -3,11 +3,12 @@
 ### Author: Johan \"{O}fverstedt
 ###
 
-import torch
 import numpy as np
-import torch.nn.functional as F
+import torch
 import torch.fft
+import torch.nn.functional as F
 import torchvision.transforms.functional as TF
+
 import transformations
 
 VALUE_TYPE = torch.float32
@@ -143,16 +144,15 @@ def create_float_tensor(shape, on_gpu, fill_value=None):
         if fill_value is not None:
             res.fill_(fill_value)
         return res
+    if fill_value is not None:
+        res = np.full(
+            (shape[0], shape[1], shape[2], shape[3]),
+            fill_value=fill_value,
+            dtype="float32",
+        )
     else:
-        if fill_value is not None:
-            res = np.full(
-                (shape[0], shape[1], shape[2], shape[3]),
-                fill_value=fill_value,
-                dtype="float32",
-            )
-        else:
-            res = np.zeros((shape[0], shape[1], shape[2], shape[3]), dtype="float32")
-        return torch.tensor(res, dtype=torch.float32)
+        res = np.zeros((shape[0], shape[1], shape[2], shape[3]), dtype="float32")
+    return torch.tensor(res, dtype=torch.float32)
 
 
 def to_tensor(A, on_gpu=True):
@@ -167,8 +167,7 @@ def to_tensor(A, on_gpu=True):
                 A_tensor, (1, A_tensor.shape[0], A_tensor.shape[1], A_tensor.shape[2])
             )
         return A_tensor
-    else:
-        return to_tensor(torch.tensor(A, dtype=VALUE_TYPE), on_gpu=on_gpu)
+    return to_tensor(torch.tensor(A, dtype=VALUE_TYPE), on_gpu=on_gpu)
 
 
 ### End helper functions
@@ -446,8 +445,7 @@ def align_rigid(
     # Return the maximum found
     if save_maps:
         return cpu_results, maps
-    else:
-        return cpu_results, None
+    return cpu_results, None
 
 
 ###
@@ -544,8 +542,7 @@ def align_rigid_and_refine(
         param = param + param2
         param = sorted(param, key=(lambda tup: tup[0]), reverse=True)
         return np.array(param[0]), (maps1, maps2)
-    else:
-        return np.array(param[0]), (maps1,)
+    return np.array(param[0]), (maps1,)
 
 
 ###

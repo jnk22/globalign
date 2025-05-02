@@ -7,9 +7,7 @@ import numpy as np
 import skimage.color
 
 # from sklearn.cluster import KMeans
-from sklearn.cluster import MiniBatchKMeans
-from sklearn.cluster import MeanShift
-from sklearn.cluster import AgglomerativeClustering
+from sklearn.cluster import AgglomerativeClustering, MeanShift, MiniBatchKMeans
 from sklearn.decomposition import PCA
 
 
@@ -140,8 +138,7 @@ def apply_pca(I):
         I_lin = I.reshape(-1, channels)
         I_res = PCA(n_components=1).fit_transform(I_lin)
         return I_res.reshape(spatial_shape)
-    else:
-        return I
+    return I
 
 
 def cat_to_colors(I, c):
@@ -150,7 +147,7 @@ def cat_to_colors(I, c):
     I_h = np.zeros(I.shape)
     I_v = np.zeros(I.shape)
     for i in range(c):
-        ind = np.where(I == i)
+        ind = np.where(i == I)
         I_h[ind] = i / float(c)
         I_v[ind] = 1.0
     I_hsv[:, :, 0] = I_h

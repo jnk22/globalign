@@ -5,6 +5,7 @@
 #
 
 import math
+
 import numpy as np
 import scipy.ndimage.interpolation
 
@@ -193,8 +194,7 @@ class TranslationTransform(TransformBase):
         res = gradients.sum(axis=0)
         if output_gradients == True:
             return res, gradients
-        else:
-            return res
+        return res
 
     def invert(self):
         self_inv = self.copy()
@@ -255,8 +255,7 @@ class Rotate2DTransform(TransformBase):
             )
 
             return res, gradients.dot(M)
-        else:
-            return res
+        return res
 
     def invert(self):
         self_inv = self.copy()
@@ -323,8 +322,7 @@ class Rigid2DTransform(TransformBase):
             )
 
             return res, gradients.dot(M)
-        else:
-            return res
+        return res
 
     def invert(self):
         self_inv = self.copy()
@@ -491,16 +489,14 @@ class AffineTransform(TransformBase):
             upd_gradients = gradients.dot(m)
 
             return g_out, upd_gradients
-        else:
-            return g_out
+        return g_out
 
     def inverse_to_forward_matrix(self):
         if self.get_dim() == 2:
             return self._inverse_to_forward_matrix_2d(self.get_params())
-        elif self.get_dim() == 3:
+        if self.get_dim() == 3:
             return self._inverse_to_forward_matrix_3d(self.get_params())
-        else:
-            return self.inverse_to_forward_matrix_num()
+        return self.inverse_to_forward_matrix_num()
 
     def _inverse_to_forward_matrix_2d(self, param):
         # Generate local variables for each parameter
@@ -1380,8 +1376,7 @@ class CompositeTransform(TransformBase):
                 cnt = t.get_param_count()
                 if index < cnt:
                     return t.get_param(index)
-                else:
-                    index = index - cnt
+                index = index - cnt
 
     def set_param(self, index, value):
         assert index >= 0
@@ -1393,8 +1388,7 @@ class CompositeTransform(TransformBase):
                 if index < cnt:
                     t.set_param(index, value)
                     return
-                else:
-                    index = index - cnt
+                index = index - cnt
 
     def set_params_const(self, value):
         for i, t in enumerate(self.transforms):
@@ -1451,8 +1445,7 @@ class CompositeTransform(TransformBase):
 
         if output_gradients == True:
             return res, gr
-        else:
-            return res
+        return res
 
     def invert(self):
         inv_transforms = []
@@ -1527,8 +1520,7 @@ def image_center_point(image, spacing=None):
     shape = image.shape
     if spacing is None:
         return (np.array(shape) - 1) * 0.5
-    else:
-        return ((np.array(shape) - 1) * spacing) * 0.5
+    return ((np.array(shape) - 1) * spacing) * 0.5
 
 
 def image_diagonal(image, spacing=None):

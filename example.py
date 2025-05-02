@@ -1,13 +1,11 @@
-import numpy as np
+import time
 
-import skimage
+import numpy as np
+from skimage import io
 from skimage.util import img_as_ubyte
-import skimage.io as io
 
 import globalign
 import nd2cat
-
-import time
 
 
 def draw_matching_squares(im1, im2, pos, sz, color_table, c1):

@@ -1,13 +1,13 @@
-import numpy as np
+import json
+import os
+import re
+import time
+
 import nibabel as nib
+import numpy as np
 
 import globalign
 import nd2cat
-import time
-
-import json
-import re
-import os
 
 
 # "Default" values are rather arbitrarily picked from 'example.py'
