@@ -1,0 +1,92 @@
+[project]
+name = "globalign"
+version = "1.0.3"
+description = "Fast global mutual information-based rigid alignment in the Fourier domain"
+authors = [{ name = "Johan Öfverstedt" }]
+readme = "README.md"
+license = "MIT"
+keywords = ["image", "registration", "2d", "fft"]
+requires-python = ">=3.10"
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "License :: OSI Approved :: MIT License",
+  "Intended Audience :: Science/Research",
+  "Intended Audience :: Education",
+  "Topic :: Utilities",
+  "Topic :: Scientific/Engineering :: Image Recognition",
+  "Operating System :: OS Independent",
+  "Natural Language :: English",
+]
+
+dependencies = [
+  "numpy",
+  "torch",
+  "torchvision",
+  "scikit-learn",
+  "scikit-image",
+]
+
+[project.urls]
+Documentation = "https://github.com/jnk22/globalign#readme"
+Issues = "https://github.com/jnk22/globalign/issues"
+Source = "https://github.com/jnk22/globalign"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+managed = true
+default-groups = ["dev", "lint"]
+
+[dependency-groups]
+dev = []
+lint = [
+  "ruff==0.11.7",
+  "mypy==1.15.0",
+  "pyright==1.1.400",
+  "vulture==2.14",
+]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+  "COM812",
+  "D203",
+  "D213",
+  "ERA001",
+  "ISC001",
+  "T201",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["D104", "F401"]
+
+[tool.mypy]
+ignore_missing_imports = true
+
+[tool.pyright]
+include = ["src"]
+exclude = ["**/__pycache__"]
+reportMissingImports = true
+reportMissingTypeStubs = false
+pythonVersion = "3.10"
+pythonPlatform = "Linux"
+
+[tool.vulture]
+paths = ["src"]
+min_confidence = 90
+make_whitelist = true
+sort_by_size = true
