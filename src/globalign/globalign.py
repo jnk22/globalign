@@ -3,19 +3,30 @@
 ### Author: Johan \"{O}fverstedt
 ###
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import numpy as np
 import torch
 import torch.fft
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
+from numpy import float64, int64
 
 import transformations
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from numpy.random import Generator
+    from numpy.typing import NDArray
 
 VALUE_TYPE = torch.float32
 
 
 # Creates a list of random angles
-def grid_angles(center, radius, n=32):
+def grid_angles(center: int, radius: float, n: int = 32) -> list[float]:
     angles = []
 
     n_denom = n
@@ -32,7 +43,13 @@ def grid_angles(center, radius, n=32):
 
 # Supply a Random number generator (e.g. 'rng = np.random.default_rng(12345)') for reproducible results
 # Default: 'rng=None' -> np.random.default_rng()
-def random_angles(centers, center_prob, radius, n=32, rng=None):
+def random_angles(
+    centers: list[float] | float,
+    center_prob: list[NDArray] | None,
+    radius: float,
+    n: int = 32,
+    rng: Generator | None = None,
+) -> list[float64 | float]:
     if rng is None:
         rng = np.random.default_rng()
 
@@ -59,16 +76,20 @@ def random_angles(centers, center_prob, radius, n=32, rng=None):
 ### Helper functions
 
 
-def compute_entropy(C, N, eps=1e-7):
+def compute_entropy(
+    C: torch.Tensor, N: torch.Tensor, eps: float = 1e-7
+) -> torch.Tensor:
     p = C / N
     return p * torch.log2(torch.clamp(p, min=eps, max=None))
 
 
-def float_compare(A, c):
+def float_compare(A: torch.Tensor, c: int) -> torch.Tensor:
     return torch.clamp(1 - torch.abs(A - c), 0.0)
 
 
-def fft_of_levelsets(A, Q, packing, setup_fn):
+def fft_of_levelsets(
+    A: torch.Tensor, Q: int, packing: int64, setup_fn: Callable
+) -> list[tuple[torch.Tensor, int, int64]]:
     fft_list = []
     for a_start in range(0, Q, packing):
         a_end = np.minimum(a_start + packing, Q)
@@ -83,28 +104,29 @@ def fft_of_levelsets(A, Q, packing, setup_fn):
     return fft_list
 
 
-def fft(A):
+def fft(A: torch.Tensor) -> torch.Tensor:
     return torch.fft.rfft2(A)
 
 
-def ifft(Afft):
+def ifft(Afft: torch.Tensor) -> torch.Tensor:
     return torch.fft.irfft2(Afft)
 
 
-def fftconv(A, B):
+def fftconv(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
     return A * B
 
 
-def corr_target_setup(A):
+def corr_target_setup(A: torch.Tensor) -> torch.Tensor:
     return fft(A)
 
 
-def corr_template_setup(B):
+def corr_template_setup(B: torch.Tensor) -> torch.Tensor:
     return torch.conj(fft(B))
 
 
-
-def corr_apply(A, B, sz, do_rounding=True):
+def corr_apply(
+    A: torch.Tensor, B: torch.Tensor, sz: torch.Tensor, do_rounding: bool = True
+) -> torch.Tensor:
     C = fftconv(A, B)
 
     C = ifft(C)
@@ -116,22 +138,28 @@ def corr_apply(A, B, sz, do_rounding=True):
     return C
 
 
-def tf_rotate(I, angle, fill_value, center=None):
-    if center is not None:
-        center = [
-            x + 0.5 for x in center
-        ]  # Half a pixel offset, since TF.rotate origin is in upper left corner
+def tf_rotate(
+    I: torch.Tensor,
+    angle: float | float64,
+    fill_value: int,
+    center: NDArray | None = None,
+) -> torch.Tensor:
+    # Half a pixel offset, since TF.rotate origin is in upper left corner
+    center_fixed = [round(x + 0.5) for x in center] if center is not None else center
+
     return TF.rotate(
         I,
         -angle,
-        center=center,
+        center=center_fixed,
         fill=[
             fill_value,
         ],
     )
 
 
-def create_float_tensor(shape, on_gpu, fill_value=None):
+def create_float_tensor(
+    shape: torch.Tensor, on_gpu: bool, fill_value: float | None = None
+) -> torch.Tensor:
     if on_gpu:
         res = torch.empty(
             (shape[0], shape[1], shape[2], shape[3]), device="cuda", dtype=torch.float32
@@ -150,7 +178,7 @@ def create_float_tensor(shape, on_gpu, fill_value=None):
     return torch.tensor(res, dtype=torch.float32)
 
 
-def to_tensor(A, on_gpu=True):
+def to_tensor(A: torch.Tensor | NDArray, on_gpu: bool = True) -> torch.Tensor:
     if torch.is_tensor(A):
         A_tensor = A.cuda(non_blocking=True) if on_gpu else A
         if A_tensor.ndim == 2:
@@ -197,18 +225,21 @@ def to_tensor(A, on_gpu=True):
 ###   is incompatible with the followed use of 'scipy.ndimage.interpolation.map_coordinates' that assumes integer coordinate-centered pixels.
 ###
 def align_rigid(
-    A,
-    B,
-    M_A,
-    M_B,
-    Q_A,
-    Q_B,
-    angles,
-    overlap=0.5,
-    enable_partial_overlap=True,
-    normalize_mi=False,
-    on_gpu=True,
-    save_maps=False,
+    A: NDArray,
+    B: NDArray,
+    M_A: NDArray | None,
+    M_B: NDArray | None,
+    Q_A: int,
+    Q_B: int,
+    angles: list[float64 | float],
+    overlap: float = 0.5,
+    enable_partial_overlap: bool = True,
+    normalize_mi: bool = False,
+    on_gpu: bool = True,
+    save_maps: bool = False,
+) -> (
+    tuple[list[tuple[NDArray, float, int64, int64, float64, float64]], None]
+    | tuple[list[tuple[NDArray, float64, int64, int64, float64, float64]], None]
 ):
     eps = 1e-7
 
@@ -469,22 +500,22 @@ def align_rigid(
 ### Returns: np.array with 6 values (mutual_information, angle, y, x, y of center of rotation, x of center of rotation), maps/None.
 ###
 def align_rigid_and_refine(
-    A,
-    B,
-    M_A,
-    M_B,
-    Q_A,
-    Q_B,
-    angles_n,
-    max_angle,
-    refinement_param=None,
-    overlap=0.5,
-    enable_partial_overlap=True,
-    normalize_mi=False,
-    on_gpu=True,
-    save_maps=False,
-    rng=None,
-):
+    A: NDArray,
+    B: NDArray,
+    M_A: NDArray,
+    M_B: NDArray,
+    Q_A: int,
+    Q_B: int,
+    angles_n: int,
+    max_angle: float,
+    refinement_param: dict[str, int | float] | None = None,
+    overlap: float = 0.5,
+    enable_partial_overlap: bool = True,
+    normalize_mi: bool = False,
+    on_gpu: bool = True,
+    save_maps: bool = False,
+    rng: Generator | None = None,
+) -> tuple[NDArray, tuple[None, None]]:
     if refinement_param is None:
         refinement_param = {"n": 32}
     angles1 = grid_angles(0, max_angle, n=angles_n)
@@ -549,8 +580,13 @@ def align_rigid_and_refine(
 ### inv: Invert the transformation, used e.g. when warping the original reference image into
 ###      the space of the original floating image.
 def warp_image_rigid(
-    ref_image, flo_image, param, mode="nearest", bg_value=0.0, inv=False
-):
+    ref_image: NDArray,
+    flo_image: NDArray,
+    param: NDArray,
+    mode: str = "nearest",
+    bg_value: list[float] = 0.0,
+    inv: bool = False,
+) -> NDArray:
     r = transformations.Rotate2DTransform()
     r.set_param(0, np.pi * param[1] / 180.0)
     translation = transformations.TranslationTransform(2)

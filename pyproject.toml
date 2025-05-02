@@ -63,6 +63,7 @@ docstring-code-format = true
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
+  "ANN401", # Allow 'Any' type until all arguments are properly typed
   "COM812",
   "D203",
   "D213",

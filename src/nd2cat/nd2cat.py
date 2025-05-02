@@ -3,15 +3,20 @@
 # Author: Johan Ofverstedt
 #
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import numpy as np
 import skimage.color
-
-# from sklearn.cluster import KMeans
 from sklearn.cluster import AgglomerativeClustering, MeanShift, MiniBatchKMeans
 from sklearn.decomposition import PCA
 
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
-def relabel_clusters(clusters):
+
+def relabel_clusters(clusters: NDArray) -> NDArray:
     k = clusters.shape[0]
     ch = clusters.shape[1]
 
@@ -70,7 +75,13 @@ def image2cat_mean_shift(I, bw=None, subset_size=10000, k=16):
     return I_res.reshape(spatial_shape)
 
 
-def image2cat_kmeans(I, k, batch_size=100, max_iter=1000, random_seed=1000):
+def image2cat_kmeans(
+    I: NDArray,
+    k: int,
+    batch_size: int = 100,
+    max_iter: int = 1000,
+    random_seed: int = 1000,
+) -> NDArray:
     total_shape = I.shape
     spatial_shape = total_shape[:-1]
     channels = total_shape[-1]
