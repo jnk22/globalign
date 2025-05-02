@@ -24,7 +24,9 @@ if TYPE_CHECKING:
 
     from transformations.transformations import CompositeTransform
 
-DEFAULT_EPS: Final = 1e-7
+EPS: Final = 1e-7
+SEPARATOR: Final = "------------------------------"
+HEADER: Final = " [MI]   [angle]  [dx] [dy] "
 
 
 # Creates a list of random angles
@@ -192,26 +194,27 @@ def align_rigid(
     on_gpu: bool = True,
     save_maps: bool = False,
 ) -> tuple[list, list | None]:
-    A_tensor = to_tensor(A, on_gpu=on_gpu)
-    B_tensor = to_tensor(B, on_gpu=on_gpu)
+    a_tensor = to_tensor(A, on_gpu=on_gpu)
+    b_tensor = to_tensor(B, on_gpu=on_gpu)
 
-    if A_tensor.shape[-1] < 1024:
+    if a_tensor.shape[-1] < 1024:
         packing = np.minimum(Q_B, 64)
-    elif A_tensor.shape[-1] <= 2048:
+    elif a_tensor.shape[-1] <= 2048:
         packing = np.minimum(Q_B, 8)
-    elif A_tensor.shape[-1] <= 4096:
+    elif a_tensor.shape[-1] <= 4096:
         packing = np.minimum(Q_B, 4)
     else:
         packing = np.minimum(Q_B, 1)
 
     # Create all constant masks if not provided
     if M_A is None:
-        M_A = create_float_tensor(A_tensor.shape, on_gpu, 1.0)
+        M_A = create_float_tensor(a_tensor.shape, on_gpu, 1.0)
     else:
         M_A = to_tensor(M_A, on_gpu)
-        A_tensor = torch.round(M_A * A_tensor + (1 - M_A) * (Q_A + 1))
+        a_tensor = torch.round(M_A * a_tensor + (1 - M_A) * (Q_A + 1))
+
     if M_B is None:
-        M_B = create_float_tensor(B_tensor.shape, on_gpu, 1.0)
+        M_B = create_float_tensor(b_tensor.shape, on_gpu, 1.0)
     else:
         M_B = to_tensor(M_B, on_gpu)
 
@@ -220,110 +223,96 @@ def align_rigid(
         pad_y, pad_x = np.round(np.array(B.shape[-2:]) * (1 - overlap)).astype(int)
         pad = (pad_x, pad_x, pad_y, pad_y)
 
-        A_tensor = F.pad(A_tensor, pad, mode="constant", value=Q_A + 1)
+        a_tensor = F.pad(a_tensor, pad, mode="constant", value=Q_A + 1)
         M_A = F.pad(M_A, pad, mode="constant", value=0)
     else:
         pad_y, pad_x = (0, 0)
 
-    ext_ashape = np.array(A_tensor.shape, dtype=int)
-    ext_bshape = np.array(B_tensor.shape, dtype=int)
-    ext_valid_shape = tuple(ext_ashape - ext_bshape + 1)
-    batched_valid_shape = tuple(ext_valid_shape + np.array([packing - 1, 0, 0, 0]))
+    ext_ashape = np.array(a_tensor.shape, dtype=int)
+    ext_bshape = np.array(b_tensor.shape, dtype=int)
+    ext_shape = tuple(ext_ashape - ext_bshape + 1)
+    batch_shape = tuple(ext_shape + np.array([packing - 1, 0, 0, 0]))
     y, x = ext_ashape[-2:] - ext_bshape[-2:]
+    out_shape = (0, x, 0, y, 0, 0, 0, 0)
 
     # use default center of rotation (which is the center point)
     center = transformations.image_center_point(B)
 
-    M_A_FFT = corr_target_setup(M_A)
-    A_ffts = [corr_target_setup(float_compare(A_tensor, a)) for a in range(Q_A)]
+    ma_fft = corr_target_setup(M_A)
+    a_ffts = [corr_target_setup(float_compare(a_tensor, a)) for a in range(Q_A)]
 
     if normalize_mi:
-        H_MARG = create_float_tensor(ext_valid_shape, on_gpu, 0.0)
-        H_AB = create_float_tensor(ext_valid_shape, on_gpu, 0.0)
+        h_marg = create_float_tensor(ext_shape, on_gpu, 0.0)
+        h_ab = create_float_tensor(ext_shape, on_gpu, 0.0)
     else:
-        MI = create_float_tensor(ext_valid_shape, on_gpu, 0.0)
+        mi = create_float_tensor(ext_shape, on_gpu, 0.0)
 
     results = []
     maps = [] if save_maps else None
 
     for angle in angles:
-        # preprocess B for angle
-        m_b_rotated = tf_rotate(M_B, angle, 0, center=center)
-        b_rotated = tf_rotate(B_tensor, angle, Q_B, center=center)
-        b_rotated = torch.round(m_b_rotated * b_rotated + (1 - m_b_rotated) * (Q_B + 1))
-        out_shape = (0, x, 0, y, 0, 0, 0, 0)
+        mb_rotated = tf_rotate(M_B, angle, 0, center=center)
+        b_rotated = tf_rotate(b_tensor, angle, Q_B, center=center)
+        b_rotated = torch.round(mb_rotated * b_rotated + (1 - mb_rotated) * (Q_B + 1))
+
+        mb_rotated = F.pad(mb_rotated, out_shape, mode="constant", value=0)
         b_rotated = F.pad(b_rotated, out_shape, mode="constant", value=Q_B + 1)
-        m_b_rotated = F.pad(m_b_rotated, out_shape, mode="constant", value=0)
 
-        M_B_FFT = corr_template_setup(m_b_rotated)
-
-        corr_0 = corr_apply(M_A_FFT, M_B_FFT, ext_valid_shape)
-        N = torch.clamp(corr_0, min=DEFAULT_EPS, max=None)
+        mb_fft = corr_template_setup(mb_rotated)
+        n = torch.clamp(corr_apply(ma_fft, mb_fft, ext_shape), min=EPS, max=None)
 
         b_ffts = fft_of_levelsets(b_rotated, Q_B, packing, corr_template_setup)
 
         for i, b_fft in enumerate(b_ffts):
-            corr_1 = corr_apply(M_A_FFT, b_fft[0], batched_valid_shape)
-            E_M = torch.sum(compute_entropy(corr_1, N, DEFAULT_EPS), dim=0)
+            arr = h_marg if normalize_mi else mi
+            arr -= torch.sum(
+                compute_entropy(corr_apply(ma_fft, b_fft[0], batch_shape), n, EPS),
+                dim=0,
+            )
 
-            if normalize_mi:
-                H_MARG = torch.sub(H_MARG, E_M)
-            else:
-                MI = torch.sub(MI, E_M)
-
-            for a in range(Q_A):
-                A_fft_cuda = A_ffts[a]
-
+            for a_fft in a_ffts:
                 if i == 0:
-                    corr_2 = corr_apply(A_fft_cuda, M_B_FFT, ext_valid_shape)
-                    E_M = compute_entropy(corr_2, N, DEFAULT_EPS)
-                    if normalize_mi:
-                        H_MARG = torch.sub(H_MARG, E_M)
-                    else:
-                        MI = torch.sub(MI, E_M)
+                    arr = h_marg if normalize_mi else mi
+                    arr -= compute_entropy(corr_apply(a_fft, mb_fft, ext_shape), n, EPS)
 
-                corr_3 = corr_apply(A_fft_cuda, b_fft[0], batched_valid_shape)
-                E_J = torch.sum(compute_entropy(corr_3, N, DEFAULT_EPS), dim=0)
-                if normalize_mi:
-                    H_AB = torch.sub(H_AB, E_J)
-                else:
-                    MI = torch.add(MI, E_J)
+                arr = h_ab if normalize_mi else mi
+                arr += torch.sum(
+                    compute_entropy(corr_apply(a_fft, b_fft[0], batch_shape), n, EPS),
+                    dim=0,
+                )
 
         if normalize_mi:
-            MI = torch.clamp((H_MARG / (H_AB + DEFAULT_EPS) - 1), 0.0, 1.0)
+            mi = torch.clamp((h_marg / (h_ab + EPS) - 1), 0.0, 1.0)
 
         if maps is not None:
-            maps.append(MI.cpu().numpy())
+            maps.append(mi.cpu().numpy())
 
-        max_n, _ = torch.max(torch.reshape(N, (-1,)), 0)
-        N_filt = torch.lt(N, overlap * max_n)
-        MI[N_filt] = 0.0
+        max_n, _ = torch.max(torch.reshape(n, (-1,)), 0)
+        n_filter = torch.lt(n, overlap * max_n)
+        mi[n_filter] = 0.0
 
-        MI_vec = torch.reshape(MI, (-1,))
-        results.append((angle, *torch.max(MI_vec, -1)))
+        mi_vec = torch.reshape(mi, (-1,))
+        results.append((angle, *torch.max(mi_vec, -1)))
 
         if normalize_mi:
-            H_MARG.fill_(0)
-            H_AB.fill_(0)
+            h_marg.fill_(0)
+            h_ab.fill_(0)
         else:
-            MI.fill_(0)
+            mi.fill_(0)
 
-    print("------------------------------")
-    print(" [MI]   [angle]  [dx] [dy] ")
     cpu_results = []
     for item in results:
         angle = item[0]
         mi = item[1].cpu().numpy()
         index = item[2].cpu().numpy()
-        sz_x = ext_valid_shape[3]
+        sz_x = ext_shape[3]
         ty = -(index // sz_x - pad_y)
         tx = -(index % sz_x - pad_x)
         cpu_results.append((mi, angle, ty, tx, center[1], center[0]))
 
     cpu_results = sorted(cpu_results, key=(lambda res: res[0]), reverse=True)
-    for mi, angle, dx, dy, *_ in cpu_results:
-        print(f"{mi:.4f} {angle:8.3f} {dx:4d} {dy:4d}")
-    print("------------------------------")
+    lines = (f"{mi:.4f} {a:8.3f} {dx:4d} {dy:4d}" for mi, a, dx, dy, *_ in cpu_results)
+    print("\n".join([SEPARATOR, HEADER, *lines, SEPARATOR]))
 
     return cpu_results, maps
 
@@ -376,7 +365,6 @@ def align_rigid_and_refine(
     if refinement_param is None:
         refinement_param = {"n": 32}
 
-    args = A, B, M_A, M_B, Q_A, Q_B
     kwargs = {
         "overlap": overlap,
         "enable_partial_overlap": enable_partial_overlap,
@@ -386,7 +374,9 @@ def align_rigid_and_refine(
     }
 
     start_angles = grid_angles(0, max_angle, n=angles_n)
-    start_results, start_maps = align_rigid(*args, angles=start_angles, **kwargs)
+    start_results, start_maps = align_rigid(
+        A, B, M_A, M_B, Q_A, Q_B, angles=start_angles, **kwargs
+    )
     best_result = start_results[0]
 
     # Extract rotations and probabilities for refinement.
@@ -398,7 +388,9 @@ def align_rigid_and_refine(
 
     angle_limit = refinement_param.get("max_angle", 3.0)
     refine_angles = random_angles(centers, center_probs, angle_limit, n=n, rng=rng)
-    refine_results, refine_maps = align_rigid(*args, angles=refine_angles, **kwargs)
+    refine_results, refine_maps = align_rigid(
+        A, B, M_A, M_B, Q_A, Q_B, angles=refine_angles, **kwargs
+    )
 
     max_result = max([best_result, refine_results[0]], key=(lambda res: res[0]))
 
