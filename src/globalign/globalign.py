@@ -246,10 +246,10 @@ def align_rigid(
     results = []
     maps = [] if save_maps else None
 
-    for mi in angles:
+    for angle in angles:
         # preprocess B for angle
-        m_b_rotated = tf_rotate(M_B, mi, 0, center=center)
-        b_rotated = tf_rotate(B_tensor, mi, Q_B, center=center)
+        m_b_rotated = tf_rotate(M_B, angle, 0, center=center)
+        b_rotated = tf_rotate(B_tensor, angle, Q_B, center=center)
         b_rotated = torch.round(m_b_rotated * b_rotated + (1 - m_b_rotated) * (Q_B + 1))
         out_shape = (0, x, 0, y, 0, 0, 0, 0)
         b_rotated = F.pad(b_rotated, out_shape, mode="constant", value=Q_B + 1)
@@ -300,7 +300,7 @@ def align_rigid(
         MI[N_filt] = 0.0
 
         MI_vec = torch.reshape(MI, (-1,))
-        results.append((mi, *torch.max(MI_vec, -1)))
+        results.append((angle, *torch.max(MI_vec, -1)))
 
         if normalize_mi:
             H_MARG.fill_(0)
