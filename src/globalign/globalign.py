@@ -557,12 +557,8 @@ def warp_image_rigid(
             t.warp(
                 flo_image[:, :, i],
                 flo_image_out[:, :, i],
-                in_spacing=np.ones(
-                    2,
-                ),
-                out_spacing=np.ones(
-                    2,
-                ),
+                in_spacing=np.ones(2),
+                out_spacing=np.ones(2),
                 mode=mode,
                 bg_value=bg_val_i,
             )
@@ -570,12 +566,8 @@ def warp_image_rigid(
         t.warp(
             flo_image,
             flo_image_out,
-            in_spacing=np.ones(
-                2,
-            ),
-            out_spacing=np.ones(
-                2,
-            ),
+            in_spacing=np.ones(2),
+            out_spacing=np.ones(2),
             mode=mode,
             bg_value=bg_value,
         )
