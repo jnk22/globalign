@@ -5,6 +5,7 @@
 #
 
 import math
+from typing import NoReturn
 
 import numpy as np
 import scipy.ndimage.interpolation
@@ -15,7 +16,7 @@ import scipy.ndimage.interpolation
 
 
 class TransformBase:
-    def __init__(self, dim, nparam):
+    def __init__(self, dim, nparam) -> None:
         self.dim = dim
         self.param = np.zeros((nparam,))
 
@@ -25,22 +26,22 @@ class TransformBase:
     def get_params(self):
         return self.param
 
-    def set_params(self, params):
+    def set_params(self, params) -> None:
         self.param[:] = params[:]
 
     def get_param(self, index):
         return self.param[index]
 
-    def set_param(self, index, value):
+    def set_param(self, index, value) -> None:
         self.param[index] = value
 
-    def set_params_const(self, value):
+    def set_params_const(self, value) -> None:
         self.param[:] = value
 
-    def step_param(self, index, step_length):
+    def step_param(self, index, step_length) -> None:
         self.param[index] = self.param[index] + step_length
 
-    def step_params(self, grad, step_length):
+    def step_params(self, grad, step_length) -> None:
         self.param = self.param + grad * step_length
 
     def get_param_count(self):
@@ -52,18 +53,18 @@ class TransformBase:
 
         return t
 
-    def copy_child(self):
+    def copy_child(self) -> NoReturn:
         raise NotImplementedError
 
     def __call__(self, pnts):
         return self.transform(pnts)
 
-    def transform(self, pnts):
+    def transform(self, pnts) -> NoReturn:
         raise NotImplementedError
 
     def warp(
         self, In, Out, in_spacing=None, out_spacing=None, mode="spline", bg_value=0.0
-    ):
+    ) -> None:
         linspaces = [
             np.linspace(0, Out.shape[i] * out_spacing[i], Out.shape[i], endpoint=False)
             for i in range(Out.ndim)
@@ -79,9 +80,9 @@ class TransformBase:
             grid_transformed[:, :] = grid_transformed[:, :] * (1.0 / in_spacing[:])
 
         grid_transformed = np.moveaxis(grid_transformed, 0, 1)
-        grid_transformed = grid_transformed.reshape((Out.ndim,) + Out.shape)
+        grid_transformed = grid_transformed.reshape((Out.ndim, *Out.shape))
 
-        if mode == "spline" or mode == "cubic":
+        if mode in {"spline", "cubic"}:
             scipy.ndimage.interpolation.map_coordinates(
                 In, coordinates=grid_transformed, output=Out, cval=bg_value
             )
@@ -99,13 +100,13 @@ class TransformBase:
         # s = s + '#Transform 0\n'
         return s + self.itk_transform_string_rec(0)
 
-    def itk_transform_string_rec(self, index):
+    def itk_transform_string_rec(self, index) -> NoReturn:
         raise NotImplementedError
 
-    def grad(self, pnts, gradients, output_gradients):
+    def grad(self, pnts, gradients, output_gradients) -> NoReturn:
         raise NotImplementedError
 
-    def invert(self):
+    def invert(self) -> NoReturn:
         raise NotImplementedError
 
     # Must be called on the forward transform
@@ -117,7 +118,7 @@ class TransformBase:
         # print(D)
         return D.dot(inv_grad)
 
-    def inverse_to_forward_matrix(self):
+    def inverse_to_forward_matrix(self) -> None:
         return None
 
     def diff(self, index, pnts, eps=1e-6):
@@ -127,8 +128,7 @@ class TransformBase:
         b.step_param(index, -eps)
         fpnts = f.transform(pnts)
         bpnts = b.transform(pnts)
-        delta = (fpnts - bpnts) * (1.0 / (2.0 * eps))
-        return delta
+        return (fpnts - bpnts) * (1.0 / (2.0 * eps))
 
     def grad_num(self, pnts, gradients, eps=1e-6):
         res = np.zeros((self.get_param_count(),))
@@ -162,9 +162,7 @@ class TransformBase:
     def grad_inverse_to_forward_num(self, inv_grad, eps=1e-6):
         D = self.inverse_to_forward_matrix_num(eps)
         # print(D)
-        G = D.dot(inv_grad)
-        # print(G)
-        return G
+        return D.dot(inv_grad)
         # res = np.zeros((self.get_param_count(),))
         # for i in range(self.get_param_count()):
         #    d = self.diff_inv(i, eps)
@@ -179,7 +177,7 @@ class TransformBase:
 
 
 class TranslationTransform(TransformBase):
-    def __init__(self, dim):
+    def __init__(self, dim) -> None:
         TransformBase.__init__(self, dim, dim)
 
     def copy_child(self):
@@ -192,7 +190,7 @@ class TranslationTransform(TransformBase):
 
     def grad(self, pnts, gradients, output_gradients):
         res = gradients.sum(axis=0)
-        if output_gradients == True:
+        if output_gradients:
             return res, gradients
         return res
 
@@ -213,11 +211,10 @@ class TranslationTransform(TransformBase):
         )
         s = s + "Parameters:"
         for i in range(self.get_param_count()):
-            s = s + (" %f" % self.get_param(i))
+            s = s + (f" {self.get_param(i):f}")
         s = s + "\n"
-        s = s + "FixedParameters:\n"
+        return s + "FixedParameters:\n"
 
-        return s
 
 
 ###
@@ -226,7 +223,7 @@ class TranslationTransform(TransformBase):
 
 
 class Rotate2DTransform(TransformBase):
-    def __init__(self):
+    def __init__(self) -> None:
         TransformBase.__init__(self, 2, 1)
 
     def copy_child(self):
@@ -249,7 +246,7 @@ class Rotate2DTransform(TransformBase):
         Mprimepnts = pnts.dot(Mprime)
         res[:] = (Mprimepnts * gradients).sum()
 
-        if output_gradients == True:
+        if output_gradients:
             M = np.transpose(
                 np.array([[cos_theta, sin_theta], [-sin_theta, cos_theta]])
             )
@@ -273,7 +270,7 @@ class Rotate2DTransform(TransformBase):
 
 
 class Rigid2DTransform(TransformBase):
-    def __init__(self):
+    def __init__(self) -> None:
         TransformBase.__init__(self, 2, 3)
 
     def copy_child(self):
@@ -298,7 +295,7 @@ class Rigid2DTransform(TransformBase):
         cos_theta = math.cos(theta)
         sin_theta = math.sin(theta)
         M = np.array([[cos_theta, sin_theta], [-sin_theta, cos_theta]])
-        
+
         pnts.dot(M, out = res)
         res[..., :] = res[..., :] + param[1:]
         return res
@@ -316,7 +313,7 @@ class Rigid2DTransform(TransformBase):
         res[0] = (pnts.dot(Mprime) * gradients).sum()
         res[1:] = gradients.sum(axis=0)
 
-        if output_gradients == True:
+        if output_gradients:
             M = np.transpose(
                 np.array([[cos_theta, sin_theta], [-sin_theta, cos_theta]])
             )
@@ -372,12 +369,11 @@ class Rigid2DTransform(TransformBase):
         )
         s = s + "Parameters:"
         for i in range(self.get_param_count()):
-            s = s + (" %f" % self.get_param(i))
+            s = s + (f" {self.get_param(i):f}")
         s = s + "\n"
         s = s + "FixedParameters:"
-        s = s + "\n"
+        return s + "\n"
 
-        return s
 
 
 ###
@@ -394,7 +390,7 @@ class Rigid2DTransform(TransformBase):
 
 
 class AffineTransform(TransformBase):
-    def __init__(self, dim):
+    def __init__(self, dim) -> None:
         TransformBase.__init__(self, dim, (dim * dim) + dim)
         param = np.zeros((dim * (dim + 1),))
         param[: dim * dim : dim + 1] = 1
@@ -425,13 +421,13 @@ class AffineTransform(TransformBase):
 
         return param[dim * dim :]
 
-    def set_matrix(self, M):
+    def set_matrix(self, M) -> None:
         dim = self.get_dim()
         param = self.get_params()
 
         param[: dim * dim] = M.reshape((dim * dim,))
 
-    def set_translation(self, t):
+    def set_translation(self, t) -> None:
         dim = self.get_dim()
         param = self.get_params()
 
@@ -440,7 +436,6 @@ class AffineTransform(TransformBase):
     # Generates homogeneous coordinate matrix
     def homogeneous(self):
         dim = self.get_dim()
-        param = self.get_params()
         h = np.zeros([dim + 1, dim + 1])
 
         h[0:dim, 0:dim] = self.get_matrix()  # param[:dim*dim].reshape((dim, dim))
@@ -449,7 +444,7 @@ class AffineTransform(TransformBase):
         return h
 
     # Convert from homogeneous coordinate matrix
-    def convert_from_homogeneous(self, h):
+    def convert_from_homogeneous(self, h) -> None:
         dim = self.get_dim()
         self.set_matrix(h[:dim, :dim])
         self.set_translation(h[:dim, dim])
@@ -481,7 +476,7 @@ class AffineTransform(TransformBase):
         #        g_out[i*self.dim:(i+1)*self.dim] = (pnts[:, j] * gradients[:, i]).sum()
         g_out[(self.dim * self.dim) :] = gradients.sum(axis=0)
 
-        if output_gradients == True:
+        if output_gradients:
             param = self.get_params()
             dim = self.get_dim()
             m = param[: dim * dim].reshape((dim, dim))
@@ -1306,14 +1301,13 @@ class AffineTransform(TransformBase):
         )
         s = s + "Parameters:"
         for i in range(self.get_param_count()):
-            s = s + (" %f" % self.get_param(i))
+            s = s + (f" {self.get_param(i):f}")
         s = s + "\n"
         s = s + "FixedParameters:"
         for i in range(self.get_dim()):
             s = s + " 0.0"
-        s = s + "\n"
+        return s + "\n"
 
-        return s
 
 
 ###
@@ -1322,7 +1316,7 @@ class AffineTransform(TransformBase):
 
 
 class CompositeTransform(TransformBase):
-    def __init__(self, dim, transforms, active_flags=None):
+    def __init__(self, dim, transforms, active_flags=None) -> None:
         self.dim = dim
 
         if active_flags is None:
@@ -1336,7 +1330,7 @@ class CompositeTransform(TransformBase):
         for i in range(len(transforms)):
             t = transforms[i]
 
-            if active_flags[i] == True:
+            if active_flags[i]:
                 cnt = cnt + t.get_param_count()
 
             self.transforms.append(t.copy())
@@ -1353,16 +1347,16 @@ class CompositeTransform(TransformBase):
         res = np.zeros((self.param_count,))
         ind = 0
         for i, t in enumerate(self.transforms):
-            if self.active_flags[i] == True:
+            if self.active_flags[i]:
                 cnt = t.get_param_count()
                 res[ind : ind + cnt] = t.get_params()
                 ind = ind + cnt
         return res
 
-    def set_params(self, params):
+    def set_params(self, params) -> None:
         ind = 0
         for i, t in enumerate(self.transforms):
-            if self.active_flags[i] == True:
+            if self.active_flags[i]:
                 cnt = t.get_param_count()
                 t.set_params(params[ind : ind + cnt])
                 ind = ind + cnt
@@ -1372,33 +1366,34 @@ class CompositeTransform(TransformBase):
         assert index < self.param_count
 
         for i, t in enumerate(self.transforms):
-            if self.active_flags[i] == True:
+            if self.active_flags[i]:
                 cnt = t.get_param_count()
                 if index < cnt:
                     return t.get_param(index)
                 index = index - cnt
+        return None
 
-    def set_param(self, index, value):
+    def set_param(self, index, value) -> None:
         assert index >= 0
         assert index < self.param_count
 
         for i, t in enumerate(self.transforms):
-            if self.active_flags[i] == True:
+            if self.active_flags[i]:
                 cnt = t.get_param_count()
                 if index < cnt:
                     t.set_param(index, value)
                     return
                 index = index - cnt
 
-    def set_params_const(self, value):
+    def set_params_const(self, value) -> None:
         for i, t in enumerate(self.transforms):
-            if self.active_flags[i] == True:
+            if self.active_flags[i]:
                 t.set_params_conts(value)
 
-    def step_param(self, index, step_length):
+    def step_param(self, index, step_length) -> None:
         self.set_param(index, self.get_param(index) + step_length)
 
-    def step_params(self, grad, step_length):
+    def step_params(self, grad, step_length) -> None:
         params = self.get_params()
         params = params + grad * step_length
         self.set_params(params)
@@ -1416,7 +1411,7 @@ class CompositeTransform(TransformBase):
         self.input_pnts = []
 
         p = pnts
-        for i, t in enumerate(self.transforms):
+        for t in self.transforms:
             self.input_pnts.append(p)
             p = t.transform(p)
 
@@ -1426,24 +1421,23 @@ class CompositeTransform(TransformBase):
     def grad(self, pnts, gradients, output_gradients):
         res = np.zeros((self.param_count,))
         ind = self.param_count
-        p = pnts
         gr = gradients
         tlen = len(self.transforms)
         for i, t in enumerate(reversed(self.transforms)):
             t_index = tlen - i - 1
             # print("Input points: " + str(self.input_pnts[i]))
             # print("Gr: " + str(gr))
-            if output_gradients == True or i < tlen - 1:
+            if output_gradients or i < tlen - 1:
                 g, gr = t.grad(self.input_pnts[t_index], gr, True)
             else:
                 g = t.grad(self.input_pnts[t_index], gr, False)
 
-            if self.active_flags[t_index] == True:
+            if self.active_flags[t_index]:
                 cnt = t.get_param_count()
                 res[ind - cnt : ind] = g
                 ind = ind - cnt
 
-        if output_gradients == True:
+        if output_gradients:
             return res, gr
         return res
 
@@ -1464,7 +1458,7 @@ class CompositeTransform(TransformBase):
         find = 0
         rind = pcnt
         for i, t in enumerate(self.transforms):
-            if self.active_flags[i] == True:
+            if self.active_flags[i]:
                 cnt = t.get_param_count()
                 rind = rind - cnt
                 mat = t.inverse_to_forward_matrix()

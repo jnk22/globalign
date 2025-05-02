@@ -70,7 +70,7 @@ def register(ref_image, flo_image, k=8, grid_angles=100, refinement_angles=32):
     return param
 
 
-def align(ref, flo):
+def align(ref, flo) -> None:
     print(f"\nAligning {ref} (reference),\n     and {flo} (floating).")
 
     # Find ID of ref and flo

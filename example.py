@@ -8,7 +8,7 @@ import globalign
 import nd2cat
 
 
-def draw_matching_squares(im1, im2, pos, sz, color_table, c1):
+def draw_matching_squares(im1, im2, pos, sz, color_table, c1) -> None:
     for c in range(color_table[0].shape[0]):
         im1[pos[0] : pos[0] + sz[0], pos[1] : pos[1] + sz[1], c] = color_table[c1][c]
         im2[pos[0] : pos[0] + sz[0], pos[1] : pos[1] + sz[1], c] = color_table[
@@ -16,9 +16,8 @@ def draw_matching_squares(im1, im2, pos, sz, color_table, c1):
         ][c]
 
 
-def example():
+def example() -> None:
     sz = 512
-    sq_sz = 32
 
     ref_image = np.zeros((sz, sz, 3))
     flo_image = np.ones((sz, sz, 3))

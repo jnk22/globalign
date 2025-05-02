@@ -40,7 +40,6 @@ def quantize_equally_spaced(I, k):
     original_shape = tuple(I.shape)
     sz = np.prod(original_shape[:-1])
     d = original_shape[-1]
-    ktot = k**d
     image_array = np.reshape(I, (sz, d))
     image_out = np.zeros((sz,))
     for i in range(d):
@@ -127,7 +126,7 @@ def image2cat_pca(I, k, sigmas=None):
 
     I_res = np.clip(0.5 * (I_res + 1.0), a_min=0.0, a_max=1.0)
 
-    return quantize_equally_spaced(I_res.reshape(spatial_shape + (1,)), k)
+    return quantize_equally_spaced(I_res.reshape((*spatial_shape, 1)), k)
 
 
 def apply_pca(I):
@@ -142,7 +141,7 @@ def apply_pca(I):
 
 
 def cat_to_colors(I, c):
-    I_hsv = np.zeros(I.shape + (3,))
+    I_hsv = np.zeros((*I.shape, 3))
     I_hsv[:, :, 1:] = 1.0
     I_h = np.zeros(I.shape)
     I_v = np.zeros(I.shape)
@@ -152,5 +151,4 @@ def cat_to_colors(I, c):
         I_v[ind] = 1.0
     I_hsv[:, :, 0] = I_h
     I_hsv[:, :, 2] = I_v
-    res = skimage.color.hsv2rgb(I_hsv)
-    return res
+    return skimage.color.hsv2rgb(I_hsv)

@@ -46,7 +46,7 @@ def random_angles(centers, center_prob, radius, n=32, rng=None):
     else:
         p = None
 
-    for i in range(n):
+    for _ in range(n):
         c = rng.choice(centers, p=p, replace=True)
         frac = rng.random()
         ang = c + (2.0 * frac - 1.0) * radius
@@ -84,29 +84,24 @@ def fft_of_levelsets(A, Q, packing, setup_fn):
 
 
 def fft(A):
-    spectrum = torch.fft.rfft2(A)
-    return spectrum
+    return torch.fft.rfft2(A)
 
 
 def ifft(Afft):
-    res = torch.fft.irfft2(Afft)
-    return res
+    return torch.fft.irfft2(Afft)
 
 
 def fftconv(A, B):
-    C = A * B
-    return C
+    return A * B
 
 
 def corr_target_setup(A):
-    B = fft(A)
-    return B
+    return fft(A)
 
 
 def corr_template_setup(B):
-    B_FFT = torch.conj(fft(B))
+    return torch.conj(fft(B))
 
-    return B_FFT
 
 
 def corr_apply(A, B, sz, do_rounding=True):
@@ -275,15 +270,12 @@ def align_rigid(
         partial_overlap_pad_sz = (0, 0)
 
     ext_ashape = A_tensor.shape
-    ashape = ext_ashape[2:]
     ext_bshape = B_tensor.shape
-    bshape = ext_bshape[2:]
     b_pad_shape = torch.tensor(A_tensor.shape, dtype=torch.long) - torch.tensor(
         B_tensor.shape, dtype=torch.long
     )
     ext_valid_shape = b_pad_shape + 1
     batched_valid_shape = ext_valid_shape + torch.tensor([packing - 1, 0, 0, 0])
-    valid_shape = ext_valid_shape[2:]
 
     # use default center of rotation (which is the center point)
     center_of_rotation = transformations.image_center_point(B)
@@ -485,7 +477,7 @@ def align_rigid_and_refine(
     Q_B,
     angles_n,
     max_angle,
-    refinement_param={"n": 32},
+    refinement_param=None,
     overlap=0.5,
     enable_partial_overlap=True,
     normalize_mi=False,
@@ -493,6 +485,8 @@ def align_rigid_and_refine(
     save_maps=False,
     rng=None,
 ):
+    if refinement_param is None:
+        refinement_param = {"n": 32}
     angles1 = grid_angles(0, max_angle, n=angles_n)
     param, maps1 = align_rigid(
         A,
@@ -516,7 +510,6 @@ def align_rigid_and_refine(
         centers.append(par[1])
         center_probs.append(par[0])
     # param[0] now the current optimimum
-    rot = param[1]
     if refinement_param.get("n", 0) > 0:
         angles2 = random_angles(
             centers,
