@@ -31,8 +31,8 @@ def register(ref_image, flo_image, k=8, grid_angles=100, refinement_angles=32):
     )
 
     # use the whole images / no masking
-    M_ref = np.ones(quantized_ref_image.shape, dtype="bool")
-    M_flo = np.ones(quantized_flo_image.shape, dtype="bool")
+    M_ref = np.ones(quantized_ref_image.shape, dtype=bool)
+    M_flo = np.ones(quantized_flo_image.shape, dtype=bool)
 
     overlap = 0.5  # at least 50% overlap
     refinement_param = {"n": refinement_angles, "max_angle": 360.0 / grid_angles}

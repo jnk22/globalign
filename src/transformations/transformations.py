@@ -1337,7 +1337,7 @@ class CompositeTransform(TransformBase):
         self.dim = dim
 
         if active_flags is None:
-            active_flags = np.ones(len(transforms), dtype="bool")
+            active_flags = np.ones(len(transforms), dtype=bool)
 
         self.active_flags = active_flags
 

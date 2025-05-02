@@ -65,8 +65,8 @@ def example() -> None:
 
     quantized_ref_image = nd2cat.image2cat_kmeans(ref_image, Q_A)
     quantized_flo_image_rot = nd2cat.image2cat_kmeans(flo_image_rot, Q_B)
-    M_ref = np.ones((sz, sz), dtype="bool")
-    M_flo = np.ones((sz, sz), dtype="bool")
+    M_ref = np.ones((sz, sz), dtype=bool)
+    M_flo = np.ones((sz, sz), dtype=bool)
     overlap = 0.5
     grid_angles = 100
     refinement_param = {"n": 32, "max_angle": 360.0 / grid_angles}
