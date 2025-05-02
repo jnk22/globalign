@@ -1530,10 +1530,7 @@ class CompositeTransform(TransformBase):
 def image_center_point(
     image: NDArray, spacing: Sequence[float] | None = None
 ) -> NDArray:
-    shape = image.shape
-    if spacing is None:
-        return (np.array(shape) - 1) * 0.5
-    return ((np.array(shape) - 1) * spacing) * 0.5
+    return (np.array(image.shape) - 1) * (spacing or 1) * 0.5
 
 
 def image_diagonal(image, spacing=None):

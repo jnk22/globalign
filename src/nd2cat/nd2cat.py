@@ -27,7 +27,8 @@ def relabel_clusters(clusters: NDArray) -> NDArray:
     used = []
     unused = list(range(k))
     prev_cluster = np.zeros((ch,))
-    while len(unused) > 0:
+
+    while unused:
         best_i = 0
         best_d = dist(prev_cluster, clusters[unused[0], :])
         for i in range(1, len(unused)):
@@ -38,6 +39,7 @@ def relabel_clusters(clusters: NDArray) -> NDArray:
         prev_cluster = clusters[unused[best_i], :]
         used.append(unused[best_i])
         unused.pop(best_i)
+
     return np.array(used)
 
 
@@ -106,9 +108,10 @@ def image2cat_kmeans_masked(I, M, k, batch_size=100, max_iter=1000, random_seed=
         return image2cat_kmeans(I, k, batch_size, max_iter, random_seed)
     total_shape = I.shape
     spatial_shape = total_shape[:-1]
-    channels = total_shape[-1]
     if k == 1:
         return np.zeros(spatial_shape, dtype="int")
+
+    channels = total_shape[-1]
     I_lin = I.reshape(-1, channels)
     M_lin = M.reshape((M.size,))
     I_lin_masked = I_lin[M_lin, :]
@@ -141,14 +144,15 @@ def image2cat_pca(I, k, sigmas=None):
 
 
 def apply_pca(I):
-    if I.ndim == 3:
-        total_shape = I.shape
-        spatial_shape = total_shape[:-1]
-        channels = total_shape[-1]
-        I_lin = I.reshape(-1, channels)
-        I_res = PCA(n_components=1).fit_transform(I_lin)
-        return I_res.reshape(spatial_shape)
-    return I
+    if I.ndim != 3:
+        return I
+
+    total_shape = I.shape
+    spatial_shape = total_shape[:-1]
+    channels = total_shape[-1]
+    I_lin = I.reshape(-1, channels)
+    I_res = PCA(n_components=1).fit_transform(I_lin)
+    return I_res.reshape(spatial_shape)
 
 
 def cat_to_colors(I, c):
