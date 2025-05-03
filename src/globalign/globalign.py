@@ -60,22 +60,26 @@ def compute_entropy(
     C: torch.Tensor, N: torch.Tensor, eps: float = 1e-7
 ) -> torch.Tensor:
     p = C / N
-    return p * torch.log2(torch.clamp(p, min=eps, max=None))
+    return p * torch.log2(torch.clamp(p, min=eps))
 
 
 def float_compare(A: torch.Tensor, c: int) -> torch.Tensor:
-    return torch.clamp(1 - torch.abs(A - c), 0.0)
+    return torch.clamp(1 - torch.abs(A - c), min=0.0)
 
 
 def fft_of_levelsets(
     A: torch.Tensor, Q: int, packing: int, setup_fn: Callable
 ) -> list[tuple[torch.Tensor, int, int]]:
+    shape = (1,) * (A.ndim - 1)
+    arange = torch.arange(0, Q, device=A.device, dtype=A.dtype).view(Q, *shape)
+
+    levelsets_all = F.relu(1 - torch.abs(A - arange))
+
     fft_list = []
     for a_start in range(0, Q, packing):
-        a_end = np.minimum(a_start + packing, Q)
-        levelsets = [float_compare(A, a) for a in range(a_start, a_end)]
-        ffts = setup_fn(torch.cat(levelsets, 0))
-        fft_list.append((ffts, a_start, a_end))
+        a_end = min(a_start + packing, Q)
+
+        fft_list.append((setup_fn(levelsets_all[a_start:a_end]), a_start, a_end))
 
     return fft_list
 
@@ -234,8 +238,10 @@ def align_rigid(
     # use default center of rotation (which is the center point)
     center = transformations.image_center_point(B)
 
-    ma_fft = corr_target_setup(M_A)
-    a_ffts = [corr_target_setup(float_compare(a_tensor, a)) for a in range(Q_A)]
+    ma_fft = torch.fft.rfft2(M_A)
+    arange = torch.arange(0, Q_A, device=a_tensor.device, dtype=a_tensor.dtype)
+    shape = (1,) * a_tensor.ndim
+    a_ffts = torch.fft.rfft2(F.relu(1 - torch.abs(a_tensor - arange.view(Q_A, *shape))))
 
     if normalize_mi:
         h_marg = create_float_tensor(ext_shape, on_gpu, 0.0)
@@ -255,7 +261,7 @@ def align_rigid(
         b_rotated = F.pad(b_rotated, out_shape, mode="constant", value=Q_B + 1)
 
         mb_fft = corr_template_setup(mb_rotated)
-        n = torch.clamp(corr_apply(ma_fft, mb_fft, ext_shape), min=EPS, max=None)
+        n = torch.clamp(corr_apply(ma_fft, mb_fft, ext_shape), min=EPS)
 
         b_ffts = fft_of_levelsets(b_rotated, Q_B, packing, corr_template_setup)
 
@@ -278,14 +284,13 @@ def align_rigid(
                 )
 
         if normalize_mi:
-            mi = torch.clamp((h_marg / (h_ab + EPS) - 1), 0.0, 1.0)
+            mi = F.relu(h_marg / (h_ab + EPS) - 1)
 
         if maps is not None:
             maps.append(mi.cpu().numpy())
 
         max_n, _ = torch.max(torch.reshape(n, (-1,)), 0)
-        n_filter = torch.lt(n, overlap * max_n)
-        mi[n_filter] = 0.0
+        mi[n < overlap * max_n] = 0.0
 
         mi_vec = torch.reshape(mi, (-1,))
         results.append((angle, *torch.max(mi_vec, -1)))
