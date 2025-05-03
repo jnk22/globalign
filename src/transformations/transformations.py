@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 import scipy.ndimage.interpolation
@@ -43,13 +43,13 @@ class TransformBase:
     def set_param(self, index: int, value: float) -> None:
         self.param[index] = value
 
-    def set_params_const(self, value) -> None:
+    def set_params_const(self, value: float) -> None:
         self.param[:] = value
 
-    def step_param(self, index, step_length) -> None:
+    def step_param(self, index: int, step_length: float) -> None:
         self.param[index] = self.param[index] + step_length
 
-    def step_params(self, grad, step_length) -> None:
+    def step_params(self, grad: NDArray, step_length: float) -> None:
         self.param = self.param + grad * step_length
 
     def get_param_count(self) -> int:
@@ -64,10 +64,10 @@ class TransformBase:
     def copy_child(self) -> Self:
         raise NotImplementedError
 
-    def __call__(self, pnts):
+    def __call__(self, pnts: NDArray) -> NDArray:
         return self.transform(pnts)
 
-    def transform(self, pnts) -> Any:
+    def transform(self, pnts: NDArray) -> NDArray:
         raise NotImplementedError
 
     def warp(
@@ -109,15 +109,17 @@ class TransformBase:
                 In, coordinates=grid_transformed, output=Out, order=0, cval=bg_value
             )
 
-    def itk_transform_string(self):
+    def itk_transform_string(self) -> str:
         s = "#Insight Transform File V1.0\n"
         # s = s + '#Transform 0\n'
         return s + self.itk_transform_string_rec(0)
 
-    def itk_transform_string_rec(self, index) -> Any:
+    def itk_transform_string_rec(self, index: int) -> str:
         raise NotImplementedError
 
-    def grad(self, pnts, gradients, output_gradients) -> Any:
+    def grad(
+        self, pnts: NDArray, gradients: NDArray, output_gradients: bool
+    ) -> NDArray | tuple[NDArray, NDArray]:
         raise NotImplementedError
 
     def invert(self) -> Self:
@@ -125,17 +127,17 @@ class TransformBase:
 
     # Must be called on the forward transform
     # Default falls back on numerical differentiation
-    def grad_inverse_to_forward(self, inv_grad):
+    def grad_inverse_to_forward(self, inv_grad: NDArray) -> NDArray:
         D = self.inverse_to_forward_matrix()
         if D is None:
             D = self.inverse_to_forward_matrix_num()
         # print(D)
         return D.dot(inv_grad)
 
-    def inverse_to_forward_matrix(self) -> None:
-        return None
+    def inverse_to_forward_matrix(self) -> NDArray:
+        raise NotImplementedError
 
-    def diff(self, index, pnts, eps=1e-6):
+    def diff(self, index: int, pnts: NDArray, eps: float = 1e-6) -> NDArray:
         f = self.copy()
         b = self.copy()
         f.step_param(index, eps)
@@ -144,7 +146,7 @@ class TransformBase:
         bpnts = b.transform(pnts)
         return (fpnts - bpnts) * (1.0 / (2.0 * eps))
 
-    def grad_num(self, pnts, gradients, eps=1e-6):
+    def grad_num(self, pnts: NDArray, gradients: NDArray, eps: float = 1e-6) -> NDArray:
         res = np.zeros((self.get_param_count(),))
         if self.get_param_count() == 1:
             d = self.diff(0, pnts, eps)
@@ -158,14 +160,14 @@ class TransformBase:
 
     # Utility function to differentiate the inverse transformation
     # with respect to the forward transformation numerically
-    def diff_inv(self, index, eps=1e-6):
+    def diff_inv(self, index: int, eps: float = 1e-6) -> NDArray:
         f = self.copy()
         b = self.copy()
         f.step_param(index, eps)
         b.step_param(index, -eps)
         return (f.invert().get_params() - b.invert().get_params()) / (2.0 * eps)
 
-    def inverse_to_forward_matrix_num(self, eps=1e-6):
+    def inverse_to_forward_matrix_num(self, eps: float = 1e-6) -> NDArray:
         D = np.zeros((self.get_param_count(), self.get_param_count()))
         for i in range(self.get_param_count()):
             d = self.diff_inv(i, eps)
@@ -173,7 +175,9 @@ class TransformBase:
         return D
 
     # Must be called on the forward transform
-    def grad_inverse_to_forward_num(self, inv_grad, eps=1e-6):
+    def grad_inverse_to_forward_num(
+        self, inv_grad: NDArray, eps: float = 1e-6
+    ) -> NDArray:
         D = self.inverse_to_forward_matrix_num(eps)
         # print(D)
         return D.dot(inv_grad)
@@ -202,7 +206,9 @@ class TranslationTransform(TransformBase):
         # print(pnts)
         return pnts + offset
 
-    def grad(self, pnts, gradients, output_gradients):
+    def grad(
+        self, pnts: NDArray, gradients: NDArray, output_gradients: bool
+    ) -> NDArray | tuple[NDArray, NDArray]:
         res = gradients.sum(axis=0)
         if output_gradients:
             return res, gradients
@@ -214,10 +220,10 @@ class TranslationTransform(TransformBase):
 
         return self_inv
 
-    def inverse_to_forward_matrix(self):
+    def inverse_to_forward_matrix(self) -> NDArray:
         return -np.eye(self.get_param_count(), self.get_param_count())
 
-    def itk_transform_string_rec(self, index):
+    def itk_transform_string_rec(self, index: int) -> str:
         s = "#Transform %d\n" % index
         s = s + "Transform: TranslationTransform_double_%d_%d\n" % (
             self.get_dim(),
@@ -250,7 +256,9 @@ class Rotate2DTransform(TransformBase):
 
         return pnts.dot(M)
 
-    def grad(self, pnts, gradients, output_gradients):
+    def grad(
+        self, pnts: NDArray, gradients: NDArray, output_gradients: bool
+    ) -> NDArray | tuple[NDArray, NDArray]:
         res = np.zeros((1,))
         theta = self.get_param(0)
         cos_theta = math.cos(theta)
@@ -273,7 +281,7 @@ class Rotate2DTransform(TransformBase):
 
         return self_inv
 
-    def inverse_to_forward_matrix(self):
+    def inverse_to_forward_matrix(self) -> NDArray:
         return np.array([[-1.0]])
 
 
@@ -286,10 +294,10 @@ class Rigid2DTransform(TransformBase):
     def __init__(self) -> None:
         TransformBase.__init__(self, 2, 3)
 
-    def copy_child(self):
+    def copy_child(self) -> Rigid2DTransform:
         return Rigid2DTransform()
 
-    def transform(self, pnts):
+    def transform(self, pnts: NDArray) -> NDArray:
         param = self.get_params()
         theta = param[0]
         cos_theta = math.cos(theta)
@@ -315,7 +323,9 @@ class Rigid2DTransform(TransformBase):
         #return pnts.dot(M) + param[1:]
     """
 
-    def grad(self, pnts, gradients, output_gradients):
+    def grad(
+        self, pnts: NDArray, gradients: NDArray, output_gradients: bool
+    ) -> NDArray | tuple[NDArray, NDArray]:
         res = np.zeros((3,))
         theta = self.get_param(0)
         cos_theta = math.cos(theta)
@@ -354,7 +364,7 @@ class Rigid2DTransform(TransformBase):
 
         return self_inv
 
-    def inverse_to_forward_matrix(self):
+    def inverse_to_forward_matrix(self) -> NDArray:
         theta = self.get_param(0)
         inv_theta = -theta
 
@@ -374,7 +384,7 @@ class Rigid2DTransform(TransformBase):
 
         return np.array([D0, D1, D2])
 
-    def itk_transform_string_rec(self, index):
+    def itk_transform_string_rec(self, index: int) -> str:
         s = "#Transform %d\n" % index
         s = s + "Transform: Rigid2DTransformBase_double_%d_%d\n" % (
             self.get_dim(),
@@ -402,16 +412,16 @@ class Rigid2DTransform(TransformBase):
 
 
 class AffineTransform(TransformBase):
-    def __init__(self, dim) -> None:
+    def __init__(self, dim: int) -> None:
         TransformBase.__init__(self, dim, (dim * dim) + dim)
         param = np.zeros((dim * (dim + 1),))
         param[: dim * dim : dim + 1] = 1
         self.set_params(param)
 
-    def copy_child(self):
+    def copy_child(self) -> AffineTransform:
         return AffineTransform(self.get_dim())
 
-    def transform(self, pnts):
+    def transform(self, pnts: NDArray) -> NDArray:
         param = self.get_params()
         dim = self.get_dim()
         m = np.transpose(param[: dim * dim].reshape((dim, dim)))
@@ -421,32 +431,32 @@ class AffineTransform(TransformBase):
 
     ### Special affine functions
 
-    def get_matrix(self):
+    def get_matrix(self) -> NDArray:
         dim = self.get_dim()
         param = self.get_params()
 
         return param[: dim * dim].reshape((dim, dim))
 
-    def get_translation(self):
+    def get_translation(self) -> NDArray:
         dim = self.get_dim()
         param = self.get_params()
 
         return param[dim * dim :]
 
-    def set_matrix(self, M) -> None:
+    def set_matrix(self, M: NDArray) -> None:
         dim = self.get_dim()
         param = self.get_params()
 
         param[: dim * dim] = M.reshape((dim * dim,))
 
-    def set_translation(self, t) -> None:
+    def set_translation(self, t: NDArray) -> None:
         dim = self.get_dim()
         param = self.get_params()
 
         param[dim * dim :] = t[:]
 
     # Generates homogeneous coordinate matrix
-    def homogeneous(self):
+    def homogeneous(self) -> NDArray:
         dim = self.get_dim()
         h = np.zeros([dim + 1, dim + 1])
 
@@ -456,7 +466,7 @@ class AffineTransform(TransformBase):
         return h
 
     # Convert from homogeneous coordinate matrix
-    def convert_from_homogeneous(self, h) -> None:
+    def convert_from_homogeneous(self, h: NDArray) -> None:
         dim = self.get_dim()
         self.set_matrix(h[:dim, :dim])
         self.set_translation(h[:dim, dim])
@@ -477,7 +487,9 @@ class AffineTransform(TransformBase):
 
         return self_inv
 
-    def grad(self, pnts, gradients, output_gradients):
+    def grad(
+        self, pnts: NDArray, gradients: NDArray, output_gradients: bool
+    ) -> NDArray | tuple[NDArray, NDArray]:
         g_out = np.zeros((self.get_param_count(),))
 
         for i in range(self.dim):
@@ -498,14 +510,14 @@ class AffineTransform(TransformBase):
             return g_out, upd_gradients
         return g_out
 
-    def inverse_to_forward_matrix(self):
+    def inverse_to_forward_matrix(self) -> NDArray:
         if self.get_dim() == 2:
             return self._inverse_to_forward_matrix_2d(self.get_params())
         if self.get_dim() == 3:
             return self._inverse_to_forward_matrix_3d(self.get_params())
         return self.inverse_to_forward_matrix_num()
 
-    def _inverse_to_forward_matrix_2d(self, param):
+    def _inverse_to_forward_matrix_2d(self, param: NDArray) -> NDArray:
         # Generate local variables for each parameter
         a_0_0 = param[0]
         a_0_1 = param[1]
@@ -557,7 +569,7 @@ class AffineTransform(TransformBase):
             ]
         )
 
-    def _inverse_to_forward_matrix_3d(self, param):
+    def _inverse_to_forward_matrix_3d(self, param: NDArray) -> NDArray:
         # Generate local variables for each parameter
         a_0_0 = param[0]
         a_0_1 = param[1]
@@ -1305,7 +1317,7 @@ class AffineTransform(TransformBase):
             ]
         )
 
-    def itk_transform_string_rec(self, index):
+    def itk_transform_string_rec(self, index: int) -> str:
         s = "#Transform %d\n" % index
         s = s + "Transform: AffineTransform_double_%d_%d\n" % (
             self.get_dim(),
@@ -1330,7 +1342,7 @@ class CompositeTransform(TransformBase):
     def __init__(
         self,
         dim: int,
-        transforms: list[TranslationTransform | CompositeTransform | Rotate2DTransform],
+        transforms: list[TransformBase],
         active_flags: NDArray | list[bool] | None = None,
     ) -> None:
         self.dim = dim
@@ -1353,13 +1365,13 @@ class CompositeTransform(TransformBase):
 
         self.param_count = cnt
 
-    def get_transforms(self):
+    def get_transforms(self) -> list[TransformBase]:
         return self.transforms
 
     def get_dim(self) -> int:
         return self.dim
 
-    def get_params(self):
+    def get_params(self) -> NDArray:
         res = np.zeros((self.param_count,))
         ind = 0
         for i, t in enumerate(self.transforms):
@@ -1369,7 +1381,7 @@ class CompositeTransform(TransformBase):
                 ind = ind + cnt
         return res
 
-    def set_params(self, params) -> None:
+    def set_params(self, params: NDArray) -> None:
         ind = 0
         for i, t in enumerate(self.transforms):
             if self.active_flags[i]:
@@ -1377,7 +1389,7 @@ class CompositeTransform(TransformBase):
                 t.set_params(params[ind : ind + cnt])
                 ind = ind + cnt
 
-    def get_param(self, index):
+    def get_param(self, index: int) -> float:
         assert index >= 0
         assert index < self.param_count
 
@@ -1387,9 +1399,8 @@ class CompositeTransform(TransformBase):
                 if index < cnt:
                     return t.get_param(index)
                 index = index - cnt
-        return None
 
-    def set_param(self, index, value) -> None:
+    def set_param(self, index: int, value: float) -> None:
         assert index >= 0
         assert index < self.param_count
 
@@ -1401,15 +1412,15 @@ class CompositeTransform(TransformBase):
                     return
                 index = index - cnt
 
-    def set_params_const(self, value) -> None:
+    def set_params_const(self, value: float) -> None:
         for i, t in enumerate(self.transforms):
             if self.active_flags[i]:
                 t.set_params_conts(value)
 
-    def step_param(self, index, step_length) -> None:
+    def step_param(self, index: int, step_length: float) -> None:
         self.set_param(index, self.get_param(index) + step_length)
 
-    def step_params(self, grad, step_length) -> None:
+    def step_params(self, grad: NDArray, step_length: float) -> None:
         params = self.get_params()
         params = params + grad * step_length
         self.set_params(params)
@@ -1434,7 +1445,9 @@ class CompositeTransform(TransformBase):
         # self.input_pnts.append(p)
         return p
 
-    def grad(self, pnts, gradients, output_gradients):
+    def grad(
+        self, pnts: NDArray, gradients: NDArray, output_gradients: bool
+    ) -> NDArray | tuple[NDArray, NDArray]:
         res = np.zeros((self.param_count,))
         ind = self.param_count
         gr = gradients
@@ -1468,7 +1481,7 @@ class CompositeTransform(TransformBase):
             self.get_dim(), inv_transforms, np.flip(self.active_flags, 0)
         )
 
-    def inverse_to_forward_matrix(self):
+    def inverse_to_forward_matrix(self) -> NDArray:
         pcnt = self.get_param_count()
         res = np.zeros((pcnt, pcnt))
         find = 0
@@ -1495,7 +1508,7 @@ class CompositeTransform(TransformBase):
         return res
     """
 
-    def itk_transform_string_rec(self, index):
+    def itk_transform_string_rec(self, index: int) -> str:
         s = "#Transform %d\n" % index
         s = s + "Transform: CompositeTransform_double_%d_%d\n" % (
             self.get_dim(),
@@ -1507,7 +1520,7 @@ class CompositeTransform(TransformBase):
 
         return s
 
-    # def grad_inverse_to_forward(self, inv_grad):
+    # def grad_inverse_to_forward(self, inv_grad: NDArray) -> NDArray:
     #    pcnt = self.get_param_count()
     #    res = np.zeros((pcnt,))
     #    ind = 0
@@ -1532,7 +1545,7 @@ def image_center_point(
     return (np.array(image.shape) - 1) * (spacing or 1) * 0.5
 
 
-def image_diagonal(image, spacing=None):
+def image_diagonal(image: NDArray, spacing: Sequence[float] | None = None) -> NDArray:
     shp = np.array(image.shape) - 1
     if spacing is not None:
         shp = shp * spacing
@@ -1540,7 +1553,7 @@ def image_diagonal(image, spacing=None):
 
 
 def make_centered_transform(
-    t: CompositeTransform, cp1: NDArray, cp2: NDArray
+    t: TransformBase, cp1: NDArray, cp2: NDArray
 ) -> CompositeTransform:
     dim = t.get_dim()
     t1 = TranslationTransform(dim)
@@ -1551,8 +1564,12 @@ def make_centered_transform(
 
 
 def make_image_centered_transform(
-    t, image1, image2, image1_spacing=None, image2_spacing=None
-):
+    t: TransformBase,
+    image1: NDArray,
+    image2: NDArray,
+    image1_spacing: Sequence[float] | None = None,
+    image2_spacing: Sequence[float] | None = None,
+) -> CompositeTransform:
     dim = image1.ndim
     t1 = TranslationTransform(dim)
     t2 = TranslationTransform(dim)

@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import time
+from typing import TYPE_CHECKING
 
 import numpy as np
 from skimage import io
@@ -7,8 +10,18 @@ from skimage.util import img_as_ubyte
 import globalign
 import nd2cat
 
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
-def draw_matching_squares(im1, im2, pos, sz, color_table, c1) -> None:
+
+def draw_matching_squares(
+    im1: NDArray,
+    im2: NDArray,
+    pos: list[int],
+    sz: list[int],
+    color_table: list[NDArray],
+    c1: int,
+) -> None:
     for c in range(color_table[0].shape[0]):
         im1[pos[0] : pos[0] + sz[0], pos[1] : pos[1] + sz[1], c] = color_table[c1][c]
         im2[pos[0] : pos[0] + sz[0], pos[1] : pos[1] + sz[1], c] = color_table[

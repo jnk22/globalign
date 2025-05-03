@@ -20,7 +20,7 @@ def relabel_clusters(clusters: NDArray) -> NDArray:
     k = clusters.shape[0]
     ch = clusters.shape[1]
 
-    def dist(a, b):
+    def dist(a: NDArray, b: NDArray) -> NDArray:
         return np.sqrt(np.sum(np.square(a - b)))
 
     # used will be a list of tuples of (centroid_sum, n)
@@ -43,7 +43,7 @@ def relabel_clusters(clusters: NDArray) -> NDArray:
     return np.array(used)
 
 
-def quantize_equally_spaced(I, k):
+def quantize_equally_spaced(I: NDArray, k: int) -> NDArray:
     original_shape = tuple(I.shape)
     sz = np.prod(original_shape[:-1])
     d = original_shape[-1]
@@ -57,7 +57,9 @@ def quantize_equally_spaced(I, k):
     return image_out.reshape(original_shape[:-1])
 
 
-def image2cat_mean_shift(I, bw=None, subset_size=10000, k=16):
+def image2cat_mean_shift(
+    I: NDArray, bw: float | None = None, subset_size: int = 10000, k: int = 16
+) -> NDArray:
     total_shape = I.shape
     spatial_shape = total_shape[:-1]
     channels = total_shape[-1]
@@ -103,7 +105,14 @@ def image2cat_kmeans(
     return I_res.reshape(spatial_shape)
 
 
-def image2cat_kmeans_masked(I, M, k, batch_size=100, max_iter=1000, random_seed=1000):
+def image2cat_kmeans_masked(
+    I: NDArray,
+    M: NDArray,
+    k: int,
+    batch_size: int = 100,
+    max_iter: int = 1000,
+    random_seed: int = 1000,
+) -> NDArray:
     if M is None:
         return image2cat_kmeans(I, k, batch_size, max_iter, random_seed)
     total_shape = I.shape
@@ -127,7 +136,7 @@ def image2cat_kmeans_masked(I, M, k, batch_size=100, max_iter=1000, random_seed=
     return I_res.reshape(spatial_shape)
 
 
-def image2cat_pca(I, k, sigmas=None):
+def image2cat_pca(I: NDArray, k: int, sigmas: float | None = None) -> NDArray:
     total_shape = I.shape
     spatial_shape = total_shape[:-1]
     channels = total_shape[-1]
@@ -143,7 +152,7 @@ def image2cat_pca(I, k, sigmas=None):
     return quantize_equally_spaced(I_res.reshape((*spatial_shape, 1)), k)
 
 
-def apply_pca(I):
+def apply_pca(I: NDArray) -> NDArray:
     if I.ndim != 3:
         return I
 
@@ -155,7 +164,7 @@ def apply_pca(I):
     return I_res.reshape(spatial_shape)
 
 
-def cat_to_colors(I, c):
+def cat_to_colors(I: NDArray, c: int) -> NDArray:
     I_hsv = np.zeros((*I.shape, 3))
     I_hsv[:, :, 1:] = 1.0
     I_h = np.zeros(I.shape)

@@ -446,11 +446,11 @@ def warp_image_rigid(
 ### param: The parameters (first value of the returned tuple from align_rigid/align_rigid_and_refine)
 ### inv: Invert the transformation, used e.g. when transforming points from the original floating image
 ###      space into the original reference image space.
-def warp_points_rigid(points, param, inv: bool = False):
+def warp_points_rigid(points: NDArray, param: NDArray, inv: bool = False) -> NDArray:
     return __create_transformation(param, inv=inv).transform(points)
 
 
-def __create_transformation(param, *, inv: bool = False) -> CompositeTransform:
+def __create_transformation(param: NDArray, *, inv: bool = False) -> CompositeTransform:
     translation = transformations.TranslationTransform(2)
     translation.set_param(0, param[2])
     translation.set_param(1, param[3])

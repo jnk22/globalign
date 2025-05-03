@@ -1,7 +1,10 @@
+from __future__ import annotations
+
 import json
 import os
 import re
 import time
+from typing import TYPE_CHECKING
 
 import nibabel as nib
 import numpy as np
@@ -9,9 +12,18 @@ import numpy as np
 import globalign
 import nd2cat
 
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
 
 # "Default" values are rather arbitrarily picked from 'example.py'
-def register(ref_image, flo_image, k=8, grid_angles=100, refinement_angles=32):
+def register(
+    ref_image: NDArray,
+    flo_image: NDArray,
+    k: int = 8,
+    grid_angles: int = 100,
+    refinement_angles: int = 32,
+) -> tuple[NDArray, tuple[list | None, ...]]:
     print(
         f"Reference image shape: {ref_image.shape}, Floating image shape:{flo_image.shape}"
     )
@@ -70,7 +82,7 @@ def register(ref_image, flo_image, k=8, grid_angles=100, refinement_angles=32):
     return param
 
 
-def align(ref, flo) -> None:
+def align(ref: str, flo: str) -> None:
     print(f"\nAligning {ref} (reference),\n     and {flo} (floating).")
 
     # Find ID of ref and flo
