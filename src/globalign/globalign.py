@@ -12,7 +12,6 @@ import torch
 import torch.fft
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
-from numpy import float64, int64
 
 import transformations
 
@@ -44,7 +43,7 @@ def random_angles(
     radius: float,
     n: int = 32,
     rng: Generator | None = None,
-) -> list[float64 | float]:
+) -> list[float]:
     if not isinstance(centers, list):
         centers = [centers]
 
@@ -69,8 +68,8 @@ def float_compare(A: torch.Tensor, c: int) -> torch.Tensor:
 
 
 def fft_of_levelsets(
-    A: torch.Tensor, Q: int, packing: int64, setup_fn: Callable
-) -> list[tuple[torch.Tensor, int, int64]]:
+    A: torch.Tensor, Q: int, packing: int, setup_fn: Callable
+) -> list[tuple[torch.Tensor, int, int]]:
     fft_list = []
     for a_start in range(0, Q, packing):
         a_end = np.minimum(a_start + packing, Q)
@@ -114,10 +113,7 @@ def corr_apply(
 
 
 def tf_rotate(
-    I: torch.Tensor,
-    angle: float | float64,
-    fill_value: int,
-    center: NDArray | None = None,
+    I: torch.Tensor, angle: float, fill_value: int, center: NDArray | None = None
 ) -> torch.Tensor:
     # Half a pixel offset, since TF.rotate origin is in upper left corner.
     center_fixed = [round(x + 0.5) for x in center] if center is not None else center
@@ -187,7 +183,7 @@ def align_rigid(
     M_B: NDArray | torch.Tensor | None,
     Q_A: int,
     Q_B: int,
-    angles: list[float64 | float],
+    angles: list[float],
     overlap: float = 0.5,
     enable_partial_overlap: bool = True,
     normalize_mi: bool = False,

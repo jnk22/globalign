@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import scipy.ndimage.interpolation
-from numpy import float64
 from typing_extensions import Self
 
 if TYPE_CHECKING:
@@ -38,10 +37,10 @@ class TransformBase:
     def set_params(self, params: NDArray) -> None:
         self.param[:] = params[:]
 
-    def get_param(self, index: int) -> float64:
+    def get_param(self, index: int) -> float:
         return self.param[index]
 
-    def set_param(self, index: int, value: float64) -> None:
+    def set_param(self, index: int, value: float) -> None:
         self.param[index] = value
 
     def set_params_const(self, value) -> None:
@@ -78,7 +77,7 @@ class TransformBase:
         in_spacing: NDArray | None = None,
         out_spacing: NDArray | None = None,
         mode: str = "spline",
-        bg_value: float64 = 0.0,
+        bg_value: float = 0.0,
     ) -> None:
         linspaces = [
             np.linspace(0, Out.shape[i] * out_spacing[i], Out.shape[i], endpoint=False)
