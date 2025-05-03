@@ -111,7 +111,7 @@ def corr_apply(
     do_rounding: bool = True,
 ) -> torch.Tensor:
     C = torch.fft.irfft2(A * B)
-    C = C[: sz[0], : sz[1], : sz[2], : sz[3]]
+    C = C[: sz[0], : sz[1], : sz[2]]
 
     return torch.round(C) if do_rounding else C
 
@@ -144,12 +144,7 @@ def to_tensor(A: torch.Tensor | NDArray, on_gpu: bool = True) -> torch.Tensor:
     else:
         A = A.to(device="cuda", non_blocking=True) if on_gpu else A
 
-    if A.ndim == 2:
-        A = A.unsqueeze(0).unsqueeze(0)
-    elif A.ndim == 3:
-        A = A.unsqueeze(0)
-
-    return A
+    return A.unsqueeze(0) if A.ndim == 2 else A
 
 
 ###
@@ -231,9 +226,9 @@ def align_rigid(
     ext_ashape = np.array(a_tensor.shape, dtype=int)
     ext_bshape = np.array(b_tensor.shape, dtype=int)
     ext_shape = tuple(ext_ashape - ext_bshape + 1)
-    batch_shape = tuple(ext_shape + np.array([packing - 1, 0, 0, 0]))
+    batch_shape = tuple(ext_shape + np.array([packing - 1, 0, 0]))
     y, x = ext_ashape[-2:] - ext_bshape[-2:]
-    out_shape = (0, x, 0, y, 0, 0, 0, 0)
+    out_shape = (0, x, 0, y, 0, 0)
 
     # use default center of rotation (which is the center point)
     center = transformations.image_center_point(B)
@@ -306,7 +301,7 @@ def align_rigid(
         angle = item[0]
         mi = item[1].cpu().numpy()
         index = item[2].cpu().numpy()
-        sz_x = ext_shape[3]
+        sz_x = ext_shape[2]
         ty = -(index // sz_x - pad_y)
         tx = -(index % sz_x - pad_x)
         cpu_results.append((mi, angle, ty, tx, center[1], center[0]))
