@@ -242,7 +242,7 @@ def align_rigid(
     else:
         mi = create_float_tensor(ext_shape, on_gpu, 0.0)
 
-    results = []
+    temp_results = []
     maps = [] if save_maps else None
 
     for angle in angles:
@@ -286,7 +286,7 @@ def align_rigid(
         mi[n < overlap * max_n] = 0.0
 
         mi_vec = torch.reshape(mi, (-1,))
-        results.append((angle, *torch.max(mi_vec, -1)))
+        temp_results.append((angle, *torch.max(mi_vec, -1)))
 
         if normalize_mi:
             h_marg.fill_(0)
@@ -294,21 +294,19 @@ def align_rigid(
         else:
             mi.fill_(0)
 
-    cpu_results = []
-    for item in results:
-        angle = item[0]
-        mi = item[1].cpu().numpy()
-        index = item[2].cpu().numpy()
-        sz_x = ext_shape[2]
-        ty = -(index // sz_x - pad_y)
-        tx = -(index % sz_x - pad_x)
-        cpu_results.append((mi, angle, ty, tx, center[1], center[0]))
+    size_x = ext_shape[2]
 
-    cpu_results = sorted(cpu_results, key=(lambda res: res[0]), reverse=True)
-    lines = (f"{mi:.4f} {a:8.3f} {dx:4d} {dy:4d}" for mi, a, dx, dy, *_ in cpu_results)
-    print("\n".join([SEPARATOR, HEADER, *lines, SEPARATOR]))
+    results = []
+    for angle, mi, index in temp_results:
+        idx = index.cpu().numpy()
+        ty = -(idx // size_x - pad_y)
+        tx = -(idx % size_x - pad_x)
+        results.append((mi.cpu().numpy(), angle, ty, tx, center[1], center[0]))
 
-    return cpu_results, maps
+    results = sorted(results, key=(lambda res: res[0]), reverse=True)
+    __print_results(results)
+
+    return results, maps
 
 
 ###
@@ -466,3 +464,8 @@ def __create_transformation(param, *, inv: bool = False) -> CompositeTransform:
     tform = transformations.make_centered_transform(tform, center, center)
 
     return tform.invert() if inv else tform
+
+
+def __print_results(results: list) -> None:
+    lines = (f"{mi:.4f} {a:8.3f} {dx:4d} {dy:4d}" for mi, a, dx, dy, *_ in results)
+    print("\n".join([SEPARATOR, HEADER, *lines, SEPARATOR]))
