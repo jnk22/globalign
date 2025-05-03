@@ -110,9 +110,7 @@ def corr_apply(
     sz: torch.Tensor | tuple[int, ...],
     do_rounding: bool = True,
 ) -> torch.Tensor:
-    C = torch.fft.irfft2(A * B)
-    C = C[: sz[0], : sz[1], : sz[2]]
-
+    C = torch.fft.irfft2(A * B)[: sz[0], : sz[1], : sz[2]]
     return torch.round(C) if do_rounding else C
 
 
