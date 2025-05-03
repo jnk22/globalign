@@ -140,9 +140,9 @@ def create_float_tensor(
 
 def to_tensor(A: torch.Tensor | NDArray, on_gpu: bool = True) -> torch.Tensor:
     if not isinstance(A, torch.Tensor):
-        A = torch.tensor(A, dtype=torch.float32)
-
-    A = A.to(device="cuda", non_blocking=True) if on_gpu else A
+        A = torch.tensor(A, dtype=torch.float32, device="cuda" if on_gpu else "cpu")
+    else:
+        A = A.to(device="cuda", non_blocking=True) if on_gpu else A
 
     if A.ndim == 2:
         A = A.unsqueeze(0).unsqueeze(0)
