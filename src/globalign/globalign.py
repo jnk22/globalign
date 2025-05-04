@@ -29,7 +29,7 @@ HEADER: Final = " [MI]   [angle]  [dx] [dy] "
 
 
 # Creates a list of random angles
-def grid_angles(center: int, radius: float, n: int = 32) -> list[float]:
+def grid_angles(center: float, radius: float, n: int = 32) -> list[float]:
     offsets = np.linspace(-radius, radius, num=n, endpoint=radius < 180)
 
     return (center + offsets).tolist()

@@ -37,6 +37,9 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
+dev = [
+    { name = "typing-extensions" },
+]
 lint = [
     { name = "mypy" },
     { name = "pyright" },
@@ -54,7 +57,7 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = []
+dev = [{ name = "typing-extensions", specifier = ">=4.13.2" }]
 lint = [
     { name = "mypy", specifier = "==1.15.0" },
     { name = "pyright", specifier = "==1.1.400" },

@@ -107,7 +107,7 @@ def image2cat_kmeans(
 
 def image2cat_kmeans_masked(
     I: NDArray,
-    M: NDArray,
+    M: NDArray | None,
     k: int,
     batch_size: int = 100,
     max_iter: int = 1000,
