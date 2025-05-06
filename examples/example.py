@@ -91,7 +91,7 @@ def example() -> None:
 
     t1 = time.time()
 
-    param = globalign.align_rigid_and_refine(
+    result, _ = globalign.align_rigid_and_refine(
         quantized_ref_image,
         quantized_flo_image_rot,
         M_ref,
@@ -110,15 +110,15 @@ def example() -> None:
 
     t2 = time.time()
     print("Time elapsed: ", t2 - t1)
-    print("Mutual information: ", param[0][0])
-    print("Rotation angle: ", param[0][1])
-    print("Translation: ", param[0][2:4])
-    print("Center of rotation: ", param[0][4:6])
+    print("Mutual information: ", result[0])
+    print("Rotation angle: ", result[1])
+    print("Translation: ", result[2:4])
+    print("Center of rotation: ", result[4:6])
 
     # apply parameters to the floating image
 
     flo_image_recovered = globalign.warp_image_rigid(
-        ref_image, flo_image_rot, param[0], mode="nearest", bg_value=[1.0, 1.0, 1.0]
+        ref_image, flo_image_rot, result, mode="nearest", bg_value=[1.0, 1.0, 1.0]
     )
 
     io.imsave("example_flo_image_recovered.png", img_as_ubyte(flo_image_recovered))
