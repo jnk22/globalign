@@ -136,13 +136,18 @@ def create_float_tensor(
     )
 
 
-def to_tensor(A: torch.Tensor | NDArray, on_gpu: bool = True) -> torch.Tensor:
+def to_tensor(
+    A: torch.Tensor | NDArray, on_gpu: bool = True, *, target_dim: int = 4
+) -> torch.Tensor:
     if not isinstance(A, torch.Tensor):
         A = torch.tensor(A, dtype=torch.float32, device="cuda" if on_gpu else "cpu")
     else:
         A = A.to(device="cuda", non_blocking=True) if on_gpu else A
 
-    return A.unsqueeze(0) if A.ndim == 2 else A
+    while A.ndim < target_dim:
+        A = A.unsqueeze(0)
+
+    return A
 
 
 ###
@@ -187,8 +192,8 @@ def align_rigid(
     on_gpu: bool = True,
     save_maps: bool = False,
 ) -> tuple[list, list | None]:
-    a_tensor = to_tensor(A, on_gpu=on_gpu)
-    b_tensor = to_tensor(B, on_gpu=on_gpu)
+    a_tensor = to_tensor(A, on_gpu=on_gpu, target_dim=3)
+    b_tensor = to_tensor(B, on_gpu=on_gpu, target_dim=3)
 
     if a_tensor.shape[-1] < 1024:
         packing = np.minimum(Q_B, 64)
@@ -203,10 +208,14 @@ def align_rigid(
     if M_A is None:
         M_A = torch.ones_like(a_tensor)
     else:
-        M_A = to_tensor(M_A, on_gpu)
+        M_A = to_tensor(M_A, on_gpu, target_dim=3)
         a_tensor = torch.round(M_A * a_tensor + (1 - M_A) * (Q_A + 1))
 
-    M_B = torch.ones_like(b_tensor) if M_B is None else to_tensor(M_B, on_gpu)
+    M_B = (
+        torch.ones_like(b_tensor)
+        if M_B is None
+        else to_tensor(M_B, on_gpu, target_dim=3)
+    )
 
     # Pad for overlap
     if enable_partial_overlap:
