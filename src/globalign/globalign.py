@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from transformations.transformations import CompositeTransform
 
 EPS: Final = 1e-7
-SEPARATOR: Final = "------------------------------"
+SEPARATOR: Final = "-" * 30
 HEADER: Final = " [MI]   [angle]  [dx] [dy] "
 
 
@@ -139,10 +139,13 @@ def create_float_tensor(
 def to_tensor(
     A: torch.Tensor | NDArray, on_gpu: bool = True, *, target_dim: int = 4
 ) -> torch.Tensor:
-    if not isinstance(A, torch.Tensor):
-        A = torch.tensor(A, dtype=torch.float32, device="cuda" if on_gpu else "cpu")
-    else:
-        A = A.to(device="cuda", non_blocking=True) if on_gpu else A
+    device = "cuda" if on_gpu else "cpu"
+
+    A = (
+        A.to(device=device, non_blocking=True)
+        if isinstance(A, torch.Tensor)
+        else torch.tensor(A, dtype=torch.float32, device=device)
+    )
 
     while A.ndim < target_dim:
         A = A.unsqueeze(0)
@@ -233,22 +236,19 @@ def align_rigid(
     batch_shape = tuple(ext_shape + np.array([packing - 1, 0, 0]))
     y, x = ext_ashape[-2:] - ext_bshape[-2:]
     out_shape = (0, x, 0, y, 0, 0)
+    device = a_tensor.device
 
     # use default center of rotation (which is the center point)
     center = transformations.image_center_point(B)
 
     ma_fft = torch.fft.rfft2(M_A)
-    arange = torch.arange(0, Q_A, device=a_tensor.device, dtype=a_tensor.dtype)
+    arange = torch.arange(0, Q_A, device=device, dtype=a_tensor.dtype)
     shape = (1,) * a_tensor.ndim
     a_ffts = torch.fft.rfft2(F.relu(1 - torch.abs(a_tensor - arange.view(Q_A, *shape))))
 
-    device = a_tensor.device
-    mi = torch.zeros(ext_shape, dtype=torch.float32, device=device)
-    h_ab = (
-        torch.zeros(ext_shape, dtype=torch.float32, device=device)
-        if normalize_mi
-        else None
-    )
+    dtype = torch.float32
+    mi = torch.zeros(ext_shape, dtype=dtype, device=device)
+    h_ab = torch.zeros(ext_shape, dtype=dtype, device=device) if normalize_mi else None
 
     temp_results = []
     maps: list[NDArray] | None = [] if save_maps else None
@@ -299,7 +299,8 @@ def align_rigid(
         results.append((mi.cpu().numpy(), angle, ty, tx, center[1], center[0]))
 
     results = sorted(results, key=(lambda res: res[0]), reverse=True)
-    __print_results(results)
+    lines = (f"{mi:.4f} {ang:8.3f} {dx:4d} {dy:4d}" for mi, ang, dx, dy, *_ in results)
+    print("\n".join([SEPARATOR, HEADER, *lines, SEPARATOR]))
 
     return results, maps
 
@@ -472,8 +473,3 @@ def __create_transformation(param: NDArray, *, inv: bool = False) -> CompositeTr
     tform = transformations.make_centered_transform(tform, center, center)
 
     return tform.invert() if inv else tform
-
-
-def __print_results(results: list) -> None:
-    lines = (f"{mi:.4f} {a:8.3f} {dx:4d} {dy:4d}" for mi, a, dx, dy, *_ in results)
-    print("\n".join([SEPARATOR, HEADER, *lines, SEPARATOR]))
