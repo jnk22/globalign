@@ -11,12 +11,12 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import scipy.ndimage.interpolation
-from typing_extensions import Self
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from numpy.typing import NDArray
+    from typing_extensions import Self
 
 ###
 ### Base class
@@ -1399,6 +1399,7 @@ class CompositeTransform(TransformBase):
                 if index < cnt:
                     return t.get_param(index)
                 index = index - cnt
+        return None
 
     def set_param(self, index: int, value: float) -> None:
         assert index >= 0

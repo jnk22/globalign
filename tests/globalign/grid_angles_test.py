@@ -23,7 +23,7 @@ from globalign import grid_angles
 )
 def test_grid_angles_radius_leq_180(
     center: float, radius: float, n: int, expected_first_last: tuple[float, float]
-):
+) -> None:
     result = grid_angles(center, radius, n)
 
     assert isinstance(result, list)
@@ -38,7 +38,7 @@ def test_grid_angles_radius_leq_180(
 )
 def test_grid_angles_radius_geq_180(
     center: float, radius: float, n: int, expected_first: float, expected_last: float
-):
+) -> None:
     result = grid_angles(center, radius, n)
 
     assert isinstance(result, list)
