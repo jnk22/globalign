@@ -215,8 +215,10 @@ def align_rigid(
     on_gpu: bool = True,
     save_maps: bool = False,
 ) -> tuple[list, list | None]:
-    a_tensor = to_tensor(A, on_gpu=on_gpu, target_dim=3)
-    b_tensor = to_tensor(B, on_gpu=on_gpu, target_dim=3)
+    device = "cuda" if on_gpu else "cpu"
+
+    a_tensor = __to_tensor(A, device=device)
+    b_tensor = __to_tensor(B, device=device)
 
     if packing is None:
         # Use default packing to reduce memory usage.
@@ -236,14 +238,10 @@ def align_rigid(
     if M_A is None:
         M_A = torch.ones_like(a_tensor)
     else:
-        M_A = to_tensor(M_A, on_gpu, target_dim=3)
+        M_A = __to_tensor(M_A, device=device)
         a_tensor = torch.round(M_A * a_tensor + (1 - M_A) * (Q_A + 1))
 
-    M_B = (
-        torch.ones_like(b_tensor)
-        if M_B is None
-        else to_tensor(M_B, on_gpu, target_dim=3)
-    )
+    M_B = torch.ones_like(b_tensor) if M_B is None else __to_tensor(M_B, device=device)
 
     # Pad for overlap
     if enable_partial_overlap:
@@ -486,6 +484,14 @@ def __fft_of_levelsets(
         torch.conj(torch.fft.rfft2(levelsets_all[a_start : min(a_start + packing, q)]))
         for a_start in range(0, q, packing)
     )
+
+
+def __to_tensor(arr: torch.Tensor | NDArray, *, device: str) -> torch.Tensor:
+    return (
+        arr.to(device=device, non_blocking=True)
+        if isinstance(arr, torch.Tensor)
+        else torch.tensor(arr, dtype=torch.float32, device=device)
+    ).unsqueeze(0)
 
 
 def __entropy(
