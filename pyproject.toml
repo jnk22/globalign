@@ -88,6 +88,9 @@ split-on-trailing-comma = false
 [tool.ruff.lint.flake8-type-checking]
 strict = true
 
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["D104", "F401"]
 "tests/*.py" = ["INP001", "S101"]

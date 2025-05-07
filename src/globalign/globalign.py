@@ -28,8 +28,28 @@ SEPARATOR: Final = "-" * 30
 HEADER: Final = " [MI]   [angle]  [dx] [dy] "
 
 
-# Creates a list of random angles
 def grid_angles(center: float, radius: float, n: int = 32) -> list[float]:
+    """Generate a list of angles around a center, within a specified radius.
+
+    Parameters
+    ----------
+    center
+        The central angle.
+    radius
+        The radius defining the range of angles.
+    n
+        The number of angles to generate (default is 32).
+
+    Returns
+    -------
+    list[float]
+        A list of angles evenly spaced within the specified range.
+
+    Raises
+    ------
+    ValueError
+        If `radius` is negative.
+    """
     if radius < 0:
         msg = "radius must be >= 0"
         raise ValueError(msg)
@@ -41,8 +61,6 @@ def grid_angles(center: float, radius: float, n: int = 32) -> list[float]:
     return (center + offsets).tolist()
 
 
-# Supply a Random number generator (e.g. 'rng = np.random.default_rng(12345)') for reproducible results
-# Default: 'rng=None' -> np.random.default_rng()
 def random_angles(
     centers: list[float] | float,
     center_prob: list[NDArray] | None,
@@ -50,6 +68,33 @@ def random_angles(
     n: int = 32,
     rng: RandomGenerator | None = None,
 ) -> list[float]:
+    """Generate a list of random angles based on given centers, probabilities, and radius.
+
+    Parameters
+    ----------
+    centers
+        The central angles from which to sample.
+    center_prob
+        The probabilities associated with each center. Must match the length of
+        `centers`. If `None`, centers are sampled uniformly.
+    radius
+        The radius within which the random angles will vary.
+    n
+        The number of random angles to generate (default is 32).
+    rng
+        A random number generator to use. If `None`, the default RNG is used.
+
+    Returns
+    -------
+    list[float]
+        A list of `n` random angles.
+
+    Raises
+    ------
+    ValueError
+        If `radius` is negative, or if `center_prob` does not match the size of
+        `centers`.
+    """
     if radius < 0:
         msg = "radius must be >= 0"
         raise ValueError(msg)
@@ -171,35 +216,6 @@ def to_tensor(
     return A
 
 
-###
-### align_rigid
-###
-### Performs rigid alignment of multimodal images using exhaustive search mutual information (MI),
-### locating the global maximum of the MI measure w.r.t. all possible whole-pixel translations as well
-### as a set of enumerated rotations. Runs on the GPU, using PyTorch.
-###
-### Parameters:
-### A: (reference 2d image).
-### B: (floating 2d image).
-### M_A: (reference 2d mask image).
-### M_B: (floating 2d mask image).
-### Q_A: (number of quantization levels in image A).
-### Q_B: (number of quantization levels in image B).
-### angles: List of angles for the rigid alignment.
-### overlap: The required overlap fraction (of the maximum overlap possible, given masks).
-### enable_partial_overlap: If False then no padding will be done, and only fully overlapping
-###    configurations will be evaluated. If True, then padding will be done to include
-###    configurations where only part of image B is overlapping image A.
-### normalize_mi: Flag to choose between normalized mutual information (NMI) or
-###    standard unnormalized mutual information.
-### packing: Maximum parallel FFT operations.
-### on_gpu: Flag controlling if the alignment is done on the GPU.
-### save_maps: Flag for exporting the stack of CMIF maps over the angles, e.g. for debugging or visualization.
-### Returns: np.array with 6 values (mutual_information, angle, y, x, y of center of rotation (origin at center of top left pixel), x of center of rotation), maps/None.
-###
-###  Note: Prior to v1.0.2, the returned center of rotation used Torchvisions convention 'Origin is the upper left corner' which
-###   is incompatible with the followed use of 'scipy.ndimage.interpolation.map_coordinates' that assumes integer coordinate-centered pixels.
-###
 def align_rigid(
     A: NDArray,
     B: NDArray,
@@ -214,7 +230,65 @@ def align_rigid(
     packing: int | None = None,
     on_gpu: bool = True,
     save_maps: bool = False,
-) -> tuple[list, list | None]:
+) -> tuple[list, list[NDArray] | None]:
+    """Align two 2D images using exhaustive search based on mutual information (MI).
+
+    This function performs rigid alignment of multimodal images using an
+    exhaustive search of mutual information (MI), locating the global maximum
+    of the MI measure with respect to all possible whole-pixel translations and
+    a set of enumerated rotations.
+
+    Parameters
+    ----------
+    A
+        The reference image.
+    B
+        The floating image.
+    M_A
+        The reference image mask.
+    M_B
+        The floating image mask.
+    Q_A
+        The number of quantization levels in image A.
+    Q_B
+        The number of quantization levels in image B.
+    angles
+        The list of angles for the rigid alignment.
+    overlap
+        The required overlap fraction (of the maximum overlap possible, given
+        the masks).
+    enable_partial_overlap
+        If False, only fully overlapping configurations are evaluated. If True,
+        padding is done to include configurations where only part of image B
+        overlaps with image A. Default is False.
+    normalize_mi
+        If True, use normalized mutual information (NMI), otherwise use
+        unnormalized mutual information. Default is True.
+    packing
+        The maximum number of parallel FFT operations. Default is automatically
+        chosen based on image size.
+    on_gpu
+        If True, the alignment is done on the GPU. Default is True.
+    save_maps
+        If True, exports the stack of CMIF maps over the angles for debugging
+        or visualization. Default is False.
+
+    Returns
+    -------
+    np.ndarray
+        A 1D array with six values: mutual information, angle, y, x, y of
+        center of rotation (origin at the center of the top-left pixel), and x
+        of center of rotation.
+    list[np.ndarray] | None
+        Stack of CMIF maps over the angles for debugging, or None.
+
+    Notes
+    -----
+    Prior to v1.0.2, the returned center of rotation used Torchvision's
+    convention ('origin is the upper left corner'), which was incompatible with
+    `scipy.ndimage.interpolation.map_coordinates`, which assumes integer
+    coordinate-centered pixels.
+    """
     device = "cuda" if on_gpu else "cpu"
 
     a_tensor = __to_tensor(A, device=device)
@@ -332,34 +406,6 @@ def align_rigid(
     return results, maps
 
 
-###
-### align_rigid_and_refine
-###
-### Performs rigid alignment of multimodal images using exhaustive search mutual information (MI),
-### locating the global maximum of the MI measure w.r.t. all possible whole-pixel translations as well
-### as a set of enumerated rotations. Runs on the GPU, using PyTorch.
-###
-### Parameters:
-### A: (reference 2d image).
-### B: (floating 2d image).
-### M_A: (reference 2d mask image).
-### M_B: (floating 2d mask image).
-### Q_A: (number of quantization levels in image A).
-### Q_B: (number of quantization levels in image B).
-### angles_n: Number of angles to consider in the grid search.
-### max_angle: The largest angle to include in the grid search. (180 => global search)
-### refinement_param: dictionary with settings for the refinement steps e.g. {'n': 32, 'max_angle': 3.0}
-### overlap: The required overlap fraction (of the maximum overlap possible, given masks).
-### enable_partial_overlap: If False then no padding will be done, and only fully overlapping
-###    configurations will be evaluated. If True, then padding will be done to include
-###    configurations where only part of image B is overlapping image A.
-### normalize_mi: Flag to choose between normalized mutual information (NMI) or
-###    standard unnormalized mutual information.
-### on_gpu: Flag controlling if the alignment is done on the GPU.
-### save_maps: Flag for exporting the stack of CMIF maps over the angles, e.g. for debugging or visualization.
-### rng: Optional random number generator (e.g. 'rng = np.random.default_rng(12345)') for reproducible results; default: None -> np.random.default_rng()
-### Returns: np.array with 6 values (mutual_information, angle, y, x, y of center of rotation, x of center of rotation), maps/None.
-###
 def align_rigid_and_refine(
     A: NDArray,
     B: NDArray,
@@ -377,7 +423,66 @@ def align_rigid_and_refine(
     save_maps: bool = False,
     rng: RandomGenerator | None = None,
     packing: int | None = None,
-) -> tuple[NDArray, tuple[list | None, ...]]:
+) -> tuple[NDArray, tuple[list[NDArray] | None, ...]]:
+    """Align two 2D images using exhaustive MI-based search with refinement.
+
+    Perform rigid alignment of multimodal images using exhaustive search mutual
+    information (MI), locating the global maximum of the MI measure with
+    respect to all possible whole-pixel translations and a set of enumerated
+    rotations.
+
+    Parameters
+    ----------
+    A
+        The reference image.
+    B
+        The floating image.
+    M_A
+        The reference image mask.
+    M_B
+        The floating image mask.
+    Q_A
+        The number of quantization levels in image A.
+    Q_B
+        The number of quantization levels in image B.
+    angles_n
+        The number of angles to consider in the grid search.
+    max_angle
+        The largest angle to include in the grid search (180 for a global
+        search).
+    refinement_param
+        A dictionary with settings for the refinement steps, e.g.,
+        `{'n': 32, 'max_angle': 3.0}`.
+    overlap
+        The required overlap fraction (of the maximum overlap possible, given
+        the masks).
+    enable_partial_overlap
+        If False, no padding will be done, and only fully overlapping
+        configurations will be evaluated. If True, padding will be done to
+        include configurations where only part of image B overlaps with image
+        A. Default is False.
+    normalize_mi
+        Flag to choose between normalized mutual information (NMI) or standard
+        unnormalized mutual information. Default is True.
+    on_gpu
+        If True, the alignment is done on the GPU. Default is True.
+    save_maps
+        If True, exports the stack of CMIF maps over the angles for debugging
+        or visualization. Default is False.
+    rng
+        An optional random number generator (e.g., `rng =
+        np.random.default_rng(12345)`) for reproducible results. Default is
+        None (uses `np.random.default_rng()`).
+
+    Returns
+    -------
+    np.ndarray
+        A 1D array with six values: mutual information, angle, y, x, y of
+        center of rotation (origin at the center of the top-left pixel), and x
+        of center of rotation.
+    tuple[list[np.ndarray] | None, ...]]
+        Stacks of CMIF maps over the angles for debugging, or None.
+    """
     if refinement_param is None:
         refinement_param = {"n": 32}
 
@@ -414,16 +519,6 @@ def align_rigid_and_refine(
     return np.array(max_result), (start_maps, refine_maps)
 
 
-###
-### warp_image_rigid
-###
-### Applies the transformation obtained by the functions align_rigid/align_rigid_and_refine
-### to warp a floating image into the space of the ref_image (using backward mapping).
-### param: The parameters (first value of the returned tuple from align_rigid/align_rigid_and_refine)
-### mode (interpolation): nearest/linear/spline
-### bg_value: The value to insert where there is no information in the flo_image
-### inv: Invert the transformation, used e.g. when warping the original reference image into
-###      the space of the original floating image.
 def warp_image_rigid(
     ref_image: NDArray,
     flo_image: NDArray,
@@ -432,6 +527,38 @@ def warp_image_rigid(
     bg_value: list[float] | float = 0.0,
     inv: bool = False,
 ) -> NDArray:
+    """Warp a floating image into the space of a reference image.
+
+    Applies the transformation obtained from `align_rigid` or `align_rigid_and_refine`
+    to warp the floating image (`flo_image`) into the coordinate space of the reference
+    image (`ref_image`) using backward mapping.
+
+    Parameters
+    ----------
+    ref_image
+        The reference image, defining the target coordinate space.
+    flo_image
+        The floating image to be warped.
+    param
+        The transformation parameters, typically the first element of the tuple returned
+        by `align_rigid` or `align_rigid_and_refine`.
+    mode
+        Interpolation mode: one of `'nearest'`, `'linear'`, `'cubic'`, or
+        `'spline'`. Default is `'nearest'`.
+    bg_value
+        The background value to use where the floating image does not cover the
+        output. Can be a single float or a list of floats (for multi-channel
+        images). Default is 0.0.
+    inv
+        If True, the transformation is inverted. This is useful when warping
+        the reference image into the space of the floating image. Default is
+        False.
+
+    Returns
+    -------
+    np.ndarray
+        The warped floating image, aligned to the reference image's space.
+    """
     tform = __create_transformation(param, inv=inv)
 
     out_shape = ref_image.shape[:2] + flo_image.shape[2:]
@@ -463,15 +590,30 @@ def warp_image_rigid(
     return flo_image_out
 
 
-###
-### warp_points_rigid
-###
-### Applies the transformation obtained by the functions align_rigid/align_rigid_and_refine
-### to transform a set of points in the reference image space into the floating image space.
-### param: The parameters (first value of the returned tuple from align_rigid/align_rigid_and_refine)
-### inv: Invert the transformation, used e.g. when transforming points from the original floating image
-###      space into the original reference image space.
 def warp_points_rigid(points: NDArray, param: NDArray, inv: bool = False) -> NDArray:
+    """Transform points between image spaces using a rigid transformation.
+
+    Applies the transformation obtained from `align_rigid` or
+    `align_rigid_and_refine` to transform a set of points from the reference
+    image space into the floating image space (or vice versa, if inverted).
+
+    Parameters
+    ----------
+    points
+        An array of points to be transformed.
+    param
+        The transformation parameters, typically the first element of the tuple
+        returned by `align_rigid` or `align_rigid_and_refine`.
+    inv
+        If True, inverts the transformation. This is useful when transforming
+        points from the floating image space back into the reference image
+        space. Default is False.
+
+    Returns
+    -------
+    np.ndarray
+        The transformed points, in the target image space.
+    """
     return __create_transformation(param, inv=inv).transform(points)
 
 
