@@ -263,7 +263,8 @@ def align_rigid(
 
     # Use default center of rotation (which is the center point) with
     # half a pixel offset, since TF.rotate origin is in upper left corner.
-    center = (transformations.image_center_point(B) + 0.5).tolist()
+    center = transformations.image_center_point(B)
+    rotation_center = (center + 0.5).tolist()
 
     ma_fft = torch.fft.rfft2(M_A)
     arange = torch.arange(0, Q_A, device=device, dtype=a_tensor.dtype)
@@ -278,8 +279,8 @@ def align_rigid(
     maps: list[NDArray] | None = [] if save_maps else None
 
     for angle in angles:
-        mb_rotated = TF.rotate(b_tensor, -angle, center=center, fill=[0])
-        b_rotated = TF.rotate(b_tensor, -angle, center=center, fill=[Q_B])
+        mb_rotated = TF.rotate(M_B, -angle, center=rotation_center, fill=[0])
+        b_rotated = TF.rotate(b_tensor, -angle, center=rotation_center, fill=[Q_B])
         b_rotated = torch.round(mb_rotated * b_rotated + (1 - mb_rotated) * (Q_B + 1))
 
         mb_rotated = F.pad(mb_rotated, out_shape, mode="constant", value=0)
