@@ -16,9 +16,9 @@ import torchvision.transforms.functional as TF
 import transformations
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Generator
 
-    from numpy.random import Generator
+    from numpy.random import Generator as RandomGenerator
     from numpy.typing import NDArray
 
     from transformations.transformations import CompositeTransform
@@ -48,7 +48,7 @@ def random_angles(
     center_prob: list[NDArray] | None,
     radius: float,
     n: int = 32,
-    rng: Generator | None = None,
+    rng: RandomGenerator | None = None,
 ) -> list[float]:
     if radius < 0:
         msg = "radius must be >= 0"
@@ -289,15 +289,16 @@ def align_rigid(
         mb_fft = torch.conj(torch.fft.rfft2(mb_rotated))
         n = torch.clamp(corr_apply(ma_fft, mb_fft, ext_shape), min=EPS)
 
+        b_ffts = __fft_of_levelsets(b_rotated, Q_B, packing)
 
         for i, b_fft in enumerate(b_ffts):
-            mi -= torch.sum(__entropy(ma_fft, b_fft[0], n, shape=batch_shape), dim=0)
+            mi -= torch.sum(__entropy(ma_fft, b_fft, n, shape=batch_shape), dim=0)
 
             for a_fft in a_ffts:
                 if i == 0:
                     mi -= __entropy(a_fft, mb_fft, n, shape=ext_shape)
 
-                mi += torch.sum(__entropy(a_fft, b_fft[0], n, shape=batch_shape), dim=0)
+                mi += torch.sum(__entropy(a_fft, b_fft, n, shape=batch_shape), dim=0)
 
         if h_ab is not None:
             mi = F.relu(mi / (h_ab + EPS) - 1)
@@ -372,7 +373,7 @@ def align_rigid_and_refine(
     normalize_mi: bool = False,
     on_gpu: bool = True,
     save_maps: bool = False,
-    rng: Generator | None = None,
+    rng: RandomGenerator | None = None,
     packing: int | None = None,
 ) -> tuple[NDArray, tuple[list | None, ...]]:
     if refinement_param is None:
@@ -470,6 +471,20 @@ def warp_image_rigid(
 ###      space into the original reference image space.
 def warp_points_rigid(points: NDArray, param: NDArray, inv: bool = False) -> NDArray:
     return __create_transformation(param, inv=inv).transform(points)
+
+
+def __fft_of_levelsets(
+    a: torch.Tensor, q: int, packing: int
+) -> Generator[torch.Tensor, None, None]:
+    shape = (1,) * (a.ndim - 1)
+    arange = torch.arange(0, q, device=a.device, dtype=a.dtype).view(q, *shape)
+
+    levelsets_all = F.relu(1 - torch.abs(a - arange))
+
+    return (
+        torch.conj(torch.fft.rfft2(levelsets_all[a_start : min(a_start + packing, q)]))
+        for a_start in range(0, q, packing)
+    )
 
 
 def __entropy(
