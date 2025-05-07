@@ -192,6 +192,7 @@ def to_tensor(
 ###    configurations where only part of image B is overlapping image A.
 ### normalize_mi: Flag to choose between normalized mutual information (NMI) or
 ###    standard unnormalized mutual information.
+### packing: Maximum parallel FFT operations.
 ### on_gpu: Flag controlling if the alignment is done on the GPU.
 ### save_maps: Flag for exporting the stack of CMIF maps over the angles, e.g. for debugging or visualization.
 ### Returns: np.array with 6 values (mutual_information, angle, y, x, y of center of rotation (origin at center of top left pixel), x of center of rotation), maps/None.
@@ -210,20 +211,26 @@ def align_rigid(
     overlap: float = 0.5,
     enable_partial_overlap: bool = True,
     normalize_mi: bool = False,
+    packing: int | None = None,
     on_gpu: bool = True,
     save_maps: bool = False,
 ) -> tuple[list, list | None]:
     a_tensor = to_tensor(A, on_gpu=on_gpu, target_dim=3)
     b_tensor = to_tensor(B, on_gpu=on_gpu, target_dim=3)
 
-    if a_tensor.shape[-1] < 1024:
-        packing = np.minimum(Q_B, 64)
-    elif a_tensor.shape[-1] <= 2048:
-        packing = np.minimum(Q_B, 8)
-    elif a_tensor.shape[-1] <= 4096:
-        packing = np.minimum(Q_B, 4)
+    if packing is None:
+        # Use default packing to reduce memory usage.
+        if a_tensor.shape[-1] < 1024:
+            packing = min(Q_B, 64)
+        elif a_tensor.shape[-1] <= 2048:
+            packing = min(Q_B, 8)
+        elif a_tensor.shape[-1] <= 4096:
+            packing = min(Q_B, 4)
+        else:
+            packing = min(Q_B, 1)
     else:
-        packing = np.minimum(Q_B, 1)
+        # packing must be >= 1, but more than Q_B is not necessary.
+        packing = max(min(Q_B, packing), 0)
 
     # Create all constant masks if not provided
     if M_A is None:
@@ -282,7 +289,6 @@ def align_rigid(
         mb_fft = torch.conj(torch.fft.rfft2(mb_rotated))
         n = torch.clamp(corr_apply(ma_fft, mb_fft, ext_shape), min=EPS)
 
-        b_ffts = fft_of_levelsets(b_rotated, Q_B, packing, corr_template_setup)
 
         for i, b_fft in enumerate(b_ffts):
             mi -= torch.sum(__entropy(ma_fft, b_fft[0], n, shape=batch_shape), dim=0)
@@ -367,6 +373,7 @@ def align_rigid_and_refine(
     on_gpu: bool = True,
     save_maps: bool = False,
     rng: Generator | None = None,
+    packing: int | None = None,
 ) -> tuple[NDArray, tuple[list | None, ...]]:
     if refinement_param is None:
         refinement_param = {"n": 32}
@@ -377,6 +384,7 @@ def align_rigid_and_refine(
         "normalize_mi": normalize_mi,
         "on_gpu": on_gpu,
         "save_maps": save_maps,
+        "packing": packing,
     }
 
     start_angles = grid_angles(0, max_angle, n=angles_n)
