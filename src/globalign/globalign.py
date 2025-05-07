@@ -82,7 +82,7 @@ def compute_entropy(
 
 
 def float_compare(A: torch.Tensor, c: int) -> torch.Tensor:
-    return torch.clamp(1 - torch.abs(A - c), min=0.0)
+    return F.relu(1 - torch.abs(A - c))
 
 
 def fft_of_levelsets(
