@@ -28,192 +28,117 @@ SEPARATOR: Final = "-" * 30
 HEADER: Final = " [MI]   [angle]  [dx] [dy] "
 
 
-def grid_angles(center: float, radius: float, n: int = 32) -> list[float]:
-    """Generate a list of angles around a center, within a specified radius.
-
-    Parameters
-    ----------
-    center
-        The central angle.
-    radius
-        The radius defining the range of angles.
-    n
-        The number of angles to generate (default is 32).
-
-    Returns
-    -------
-    list[float]
-        A list of angles evenly spaced within the specified range.
-
-    Raises
-    ------
-    ValueError
-        If `radius` is negative.
-    """
-    if radius < 0:
-        msg = "radius must be >= 0"
-        raise ValueError(msg)
-    if n < 1:
-        return []
-
-    offsets = np.linspace(-radius, radius, num=n, endpoint=radius < 180)
-
-    return (center + offsets).tolist()
-
-
-def random_angles(
-    centers: list[float] | float,
-    center_prob: list[NDArray] | None,
-    radius: float,
-    n: int = 32,
+def align_rigid_and_refine(
+    A: NDArray,
+    B: NDArray,
+    M_A: NDArray | torch.Tensor | None,
+    M_B: NDArray | torch.Tensor | None,
+    Q_A: int,
+    Q_B: int,
+    angles_n: int,
+    max_angle: float,
+    refinement_param: dict[str, Any] | None = None,
+    overlap: float = 0.5,
+    enable_partial_overlap: bool = True,
+    normalize_mi: bool = False,
+    on_gpu: bool = True,
+    save_maps: bool = False,
     rng: RandomGenerator | None = None,
-) -> list[float]:
-    """Generate a list of random angles based on given centers, probabilities, and radius.
+    packing: int | None = None,
+) -> tuple[NDArray, tuple[list[NDArray] | None, ...]]:
+    """Align two 2D images using exhaustive MI-based search with refinement.
+
+    Perform rigid alignment of multimodal images using exhaustive search mutual
+    information (MI), locating the global maximum of the MI measure with
+    respect to all possible whole-pixel translations and a set of enumerated
+    rotations.
 
     Parameters
     ----------
-    centers
-        The central angles from which to sample.
-    center_prob
-        The probabilities associated with each center. Must match the length of
-        `centers`. If `None`, centers are sampled uniformly.
-    radius
-        The radius within which the random angles will vary.
-    n
-        The number of random angles to generate (default is 32).
+    A
+        The reference image.
+    B
+        The floating image.
+    M_A
+        The reference image mask.
+    M_B
+        The floating image mask.
+    Q_A
+        The number of quantization levels in image A.
+    Q_B
+        The number of quantization levels in image B.
+    angles_n
+        The number of angles to consider in the grid search.
+    max_angle
+        The largest angle to include in the grid search (180 for a global
+        search).
+    refinement_param
+        A dictionary with settings for the refinement steps, e.g.,
+        `{'n': 32, 'max_angle': 3.0}`.
+    overlap
+        The required overlap fraction (of the maximum overlap possible, given
+        the masks).
+    enable_partial_overlap
+        If False, no padding will be done, and only fully overlapping
+        configurations will be evaluated. If True, padding will be done to
+        include configurations where only part of image B overlaps with image
+        A. Default is False.
+    normalize_mi
+        Flag to choose between normalized mutual information (NMI) or standard
+        unnormalized mutual information. Default is True.
+    on_gpu
+        If True, the alignment is done on the GPU. Default is True.
+    save_maps
+        If True, exports the stack of CMIF maps over the angles for debugging
+        or visualization. Default is False.
     rng
-        A random number generator to use. If `None`, the default RNG is used.
+        An optional random number generator (e.g., `rng =
+        np.random.default_rng(12345)`) for reproducible results. Default is
+        None (uses `np.random.default_rng()`).
 
     Returns
     -------
-    list[float]
-        A list of `n` random angles.
-
-    Raises
-    ------
-    ValueError
-        If `radius` is negative, or if `center_prob` does not match the size of
-        `centers`.
+    np.ndarray
+        A 1D array with six values: mutual information, angle, y, x, y of
+        center of rotation (origin at the center of the top-left pixel), and x
+        of center of rotation.
+    tuple[list[np.ndarray] | None, ...]]
+        Stacks of CMIF maps over the angles for debugging, or None.
     """
-    if radius < 0:
-        msg = "radius must be >= 0"
-        raise ValueError(msg)
-    if n < 1:
-        return []
+    if refinement_param is None:
+        refinement_param = {"n": 32}
 
-    centers_vector = np.atleast_1d(centers)
+    kwargs: dict[str, Any] = {
+        "overlap": overlap,
+        "enable_partial_overlap": enable_partial_overlap,
+        "normalize_mi": normalize_mi,
+        "on_gpu": on_gpu,
+        "save_maps": save_maps,
+        "packing": packing,
+    }
 
-    if center_prob is not None:
-        if len(center_prob) != len(centers_vector):
-            msg = "centers and center_prob must have same size"
-            raise ValueError(msg)
+    start_angles = grid_angles(0, max_angle, n=angles_n)
+    start_results, start_maps = align_rigid(
+        A, B, M_A, M_B, Q_A, Q_B, angles=start_angles, **kwargs
+    )
+    best_result = start_results[0]
 
-        p = center_prob / np.sum(center_prob)
-    else:
-        p = None
+    # Extract rotations and probabilities for refinement.
+    centers, center_probs = best_result[1], [best_result[0]]
 
-    rng = rng or np.random.default_rng()
-    sampled_centers = rng.choice(centers_vector, size=n, p=p)
-    noise = rng.uniform(-radius, radius, size=n)
+    n = refinement_param.get("n", 0)
+    if n <= 0:
+        return np.array(best_result), (start_maps,)
 
-    return (sampled_centers + noise).tolist()
-
-
-def compute_entropy(
-    C: torch.Tensor, N: torch.Tensor, eps: float = 1e-7
-) -> torch.Tensor:
-    p = C / N
-    return p * torch.log2(torch.clamp(p, min=eps))
-
-
-def float_compare(A: torch.Tensor, c: int) -> torch.Tensor:
-    return F.relu(1 - torch.abs(A - c))
-
-
-def fft_of_levelsets(
-    A: torch.Tensor, Q: int, packing: int, setup_fn: Callable
-) -> list[tuple[torch.Tensor, int, int]]:
-    shape = (1,) * (A.ndim - 1)
-    arange = torch.arange(0, Q, device=A.device, dtype=A.dtype).view(Q, *shape)
-
-    levelsets_all = F.relu(1 - torch.abs(A - arange))
-
-    fft_list = []
-    for a_start in range(0, Q, packing):
-        a_end = min(a_start + packing, Q)
-
-        fft_list.append((setup_fn(levelsets_all[a_start:a_end]), a_start, a_end))
-
-    return fft_list
-
-
-def fft(A: torch.Tensor) -> torch.Tensor:
-    return torch.fft.rfft2(A)
-
-
-def ifft(Afft: torch.Tensor) -> torch.Tensor:
-    return torch.fft.irfft2(Afft)
-
-
-def fftconv(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
-    return A * B
-
-
-def corr_target_setup(A: torch.Tensor) -> torch.Tensor:
-    return torch.fft.rfft2(A)
-
-
-def corr_template_setup(B: torch.Tensor) -> torch.Tensor:
-    return torch.conj(torch.fft.rfft2(B))
-
-
-def corr_apply(
-    A: torch.Tensor,
-    B: torch.Tensor,
-    sz: torch.Tensor | tuple[int, ...],
-    do_rounding: bool = True,
-) -> torch.Tensor:
-    C = torch.fft.irfft2(A * B)[: sz[0], : sz[1], : sz[2]]
-    return torch.round(C) if do_rounding else C
-
-
-def tf_rotate(
-    I: torch.Tensor, angle: float, fill_value: int, center: NDArray | None = None
-) -> torch.Tensor:
-    # Half a pixel offset, since TF.rotate origin is in upper left corner.
-    center_fixed = (center + 0.5).tolist() if center is not None else center
-
-    return TF.rotate(I, -angle, center=center_fixed, fill=[fill_value])
-
-
-def create_float_tensor(
-    shape: torch.Tensor | tuple[int, ...], on_gpu: bool, fill_value: float | None = None
-) -> torch.Tensor:
-    device = "cuda" if on_gpu else "cpu"
-
-    # Explicitly convert each tensor element as integer to solve pyright warnings.
-    out_shape = tuple(int(dim) for dim in shape)
-
-    return torch.full(
-        out_shape, fill_value=fill_value or 0, dtype=torch.float32, device=device
+    angle_limit = refinement_param.get("max_angle", 3.0)
+    refine_angles = random_angles(centers, center_probs, angle_limit, n=n, rng=rng)
+    refine_results, refine_maps = align_rigid(
+        A, B, M_A, M_B, Q_A, Q_B, angles=refine_angles, **kwargs
     )
 
+    max_result = max([best_result, refine_results[0]], key=(lambda res: res[0]))
 
-def to_tensor(
-    A: torch.Tensor | NDArray, on_gpu: bool = True, *, target_dim: int = 4
-) -> torch.Tensor:
-    device = "cuda" if on_gpu else "cpu"
-
-    A = (
-        A.to(device=device, non_blocking=True)
-        if isinstance(A, torch.Tensor)
-        else torch.tensor(A, dtype=torch.float32, device=device)
-    )
-
-    while A.ndim < target_dim:
-        A = A.unsqueeze(0)
-
-    return A
+    return np.array(max_result), (start_maps, refine_maps)
 
 
 def align_rigid(
@@ -406,117 +331,95 @@ def align_rigid(
     return results, maps
 
 
-def align_rigid_and_refine(
-    A: NDArray,
-    B: NDArray,
-    M_A: NDArray | torch.Tensor | None,
-    M_B: NDArray | torch.Tensor | None,
-    Q_A: int,
-    Q_B: int,
-    angles_n: int,
-    max_angle: float,
-    refinement_param: dict[str, Any] | None = None,
-    overlap: float = 0.5,
-    enable_partial_overlap: bool = True,
-    normalize_mi: bool = False,
-    on_gpu: bool = True,
-    save_maps: bool = False,
-    rng: RandomGenerator | None = None,
-    packing: int | None = None,
-) -> tuple[NDArray, tuple[list[NDArray] | None, ...]]:
-    """Align two 2D images using exhaustive MI-based search with refinement.
-
-    Perform rigid alignment of multimodal images using exhaustive search mutual
-    information (MI), locating the global maximum of the MI measure with
-    respect to all possible whole-pixel translations and a set of enumerated
-    rotations.
+def grid_angles(center: float, radius: float, n: int = 32) -> list[float]:
+    """Generate a list of angles around a center, within a specified radius.
 
     Parameters
     ----------
-    A
-        The reference image.
-    B
-        The floating image.
-    M_A
-        The reference image mask.
-    M_B
-        The floating image mask.
-    Q_A
-        The number of quantization levels in image A.
-    Q_B
-        The number of quantization levels in image B.
-    angles_n
-        The number of angles to consider in the grid search.
-    max_angle
-        The largest angle to include in the grid search (180 for a global
-        search).
-    refinement_param
-        A dictionary with settings for the refinement steps, e.g.,
-        `{'n': 32, 'max_angle': 3.0}`.
-    overlap
-        The required overlap fraction (of the maximum overlap possible, given
-        the masks).
-    enable_partial_overlap
-        If False, no padding will be done, and only fully overlapping
-        configurations will be evaluated. If True, padding will be done to
-        include configurations where only part of image B overlaps with image
-        A. Default is False.
-    normalize_mi
-        Flag to choose between normalized mutual information (NMI) or standard
-        unnormalized mutual information. Default is True.
-    on_gpu
-        If True, the alignment is done on the GPU. Default is True.
-    save_maps
-        If True, exports the stack of CMIF maps over the angles for debugging
-        or visualization. Default is False.
-    rng
-        An optional random number generator (e.g., `rng =
-        np.random.default_rng(12345)`) for reproducible results. Default is
-        None (uses `np.random.default_rng()`).
+    center
+        The central angle.
+    radius
+        The radius defining the range of angles.
+    n
+        The number of angles to generate (default is 32).
 
     Returns
     -------
-    np.ndarray
-        A 1D array with six values: mutual information, angle, y, x, y of
-        center of rotation (origin at the center of the top-left pixel), and x
-        of center of rotation.
-    tuple[list[np.ndarray] | None, ...]]
-        Stacks of CMIF maps over the angles for debugging, or None.
+    list[float]
+        A list of angles evenly spaced within the specified range.
+
+    Raises
+    ------
+    ValueError
+        If `radius` is negative.
     """
-    if refinement_param is None:
-        refinement_param = {"n": 32}
+    if radius < 0:
+        msg = "radius must be >= 0"
+        raise ValueError(msg)
+    if n < 1:
+        return []
 
-    kwargs: dict[str, Any] = {
-        "overlap": overlap,
-        "enable_partial_overlap": enable_partial_overlap,
-        "normalize_mi": normalize_mi,
-        "on_gpu": on_gpu,
-        "save_maps": save_maps,
-        "packing": packing,
-    }
+    offsets = np.linspace(-radius, radius, num=n, endpoint=radius < 180)
 
-    start_angles = grid_angles(0, max_angle, n=angles_n)
-    start_results, start_maps = align_rigid(
-        A, B, M_A, M_B, Q_A, Q_B, angles=start_angles, **kwargs
-    )
-    best_result = start_results[0]
+    return (center + offsets).tolist()
 
-    # Extract rotations and probabilities for refinement.
-    centers, center_probs = best_result[1], [best_result[0]]
 
-    n = refinement_param.get("n", 0)
-    if n <= 0:
-        return np.array(best_result), (start_maps,)
+def random_angles(
+    centers: list[float] | float,
+    center_prob: list[NDArray] | None,
+    radius: float,
+    n: int = 32,
+    rng: RandomGenerator | None = None,
+) -> list[float]:
+    """Generate a list of random angles based on given centers, probabilities, and radius.
 
-    angle_limit = refinement_param.get("max_angle", 3.0)
-    refine_angles = random_angles(centers, center_probs, angle_limit, n=n, rng=rng)
-    refine_results, refine_maps = align_rigid(
-        A, B, M_A, M_B, Q_A, Q_B, angles=refine_angles, **kwargs
-    )
+    Parameters
+    ----------
+    centers
+        The central angles from which to sample.
+    center_prob
+        The probabilities associated with each center. Must match the length of
+        `centers`. If `None`, centers are sampled uniformly.
+    radius
+        The radius within which the random angles will vary.
+    n
+        The number of random angles to generate (default is 32).
+    rng
+        A random number generator to use. If `None`, the default RNG is used.
 
-    max_result = max([best_result, refine_results[0]], key=(lambda res: res[0]))
+    Returns
+    -------
+    list[float]
+        A list of `n` random angles.
 
-    return np.array(max_result), (start_maps, refine_maps)
+    Raises
+    ------
+    ValueError
+        If `radius` is negative, or if `center_prob` does not match the size of
+        `centers`.
+    """
+    if radius < 0:
+        msg = "radius must be >= 0"
+        raise ValueError(msg)
+    if n < 1:
+        return []
+
+    centers_vector = np.atleast_1d(centers)
+
+    if center_prob is not None:
+        if len(center_prob) != len(centers_vector):
+            msg = "centers and center_prob must have same size"
+            raise ValueError(msg)
+
+        p = center_prob / np.sum(center_prob)
+    else:
+        p = None
+
+    rng = rng or np.random.default_rng()
+    sampled_centers = rng.choice(centers_vector, size=n, p=p)
+    noise = rng.uniform(-radius, radius, size=n)
+
+    return (sampled_centers + noise).tolist()
 
 
 def warp_image_rigid(
@@ -615,6 +518,103 @@ def warp_points_rigid(points: NDArray, param: NDArray, inv: bool = False) -> NDA
         The transformed points, in the target image space.
     """
     return __create_transformation(param, inv=inv).transform(points)
+
+
+def compute_entropy(
+    C: torch.Tensor, N: torch.Tensor, eps: float = 1e-7
+) -> torch.Tensor:
+    p = C / N
+    return p * torch.log2(torch.clamp(p, min=eps))
+
+
+def float_compare(A: torch.Tensor, c: int) -> torch.Tensor:
+    return F.relu(1 - torch.abs(A - c))
+
+
+def fft_of_levelsets(
+    A: torch.Tensor, Q: int, packing: int, setup_fn: Callable
+) -> list[tuple[torch.Tensor, int, int]]:
+    shape = (1,) * (A.ndim - 1)
+    arange = torch.arange(0, Q, device=A.device, dtype=A.dtype).view(Q, *shape)
+
+    levelsets_all = F.relu(1 - torch.abs(A - arange))
+
+    fft_list = []
+    for a_start in range(0, Q, packing):
+        a_end = min(a_start + packing, Q)
+
+        fft_list.append((setup_fn(levelsets_all[a_start:a_end]), a_start, a_end))
+
+    return fft_list
+
+
+def fft(A: torch.Tensor) -> torch.Tensor:
+    return torch.fft.rfft2(A)
+
+
+def ifft(Afft: torch.Tensor) -> torch.Tensor:
+    return torch.fft.irfft2(Afft)
+
+
+def fftconv(A: torch.Tensor, B: torch.Tensor) -> torch.Tensor:
+    return A * B
+
+
+def corr_target_setup(A: torch.Tensor) -> torch.Tensor:
+    return torch.fft.rfft2(A)
+
+
+def corr_template_setup(B: torch.Tensor) -> torch.Tensor:
+    return torch.conj(torch.fft.rfft2(B))
+
+
+def corr_apply(
+    A: torch.Tensor,
+    B: torch.Tensor,
+    sz: torch.Tensor | tuple[int, ...],
+    do_rounding: bool = True,
+) -> torch.Tensor:
+    C = torch.fft.irfft2(A * B)[: sz[0], : sz[1], : sz[2]]
+    return torch.round(C) if do_rounding else C
+
+
+def tf_rotate(
+    I: torch.Tensor, angle: float, fill_value: int, center: NDArray | None = None
+) -> torch.Tensor:
+    # Half a pixel offset, since TF.rotate origin is in upper left corner.
+    center_fixed = (center + 0.5).tolist() if center is not None else center
+
+    return TF.rotate(I, -angle, center=center_fixed, fill=[fill_value])
+
+
+def create_float_tensor(
+    shape: torch.Tensor | tuple[int, ...], on_gpu: bool, fill_value: float | None = None
+) -> torch.Tensor:
+    device = "cuda" if on_gpu else "cpu"
+
+    # Explicitly convert each tensor element as integer to solve pyright warnings.
+    out_shape = tuple(int(dim) for dim in shape)
+
+    return torch.full(
+        out_shape, fill_value=fill_value or 0, dtype=torch.float32, device=device
+    )
+
+
+def to_tensor(
+    A: torch.Tensor | NDArray, on_gpu: bool = True, *, target_dim: int = 4
+) -> torch.Tensor:
+    device = "cuda" if on_gpu else "cpu"
+
+    A = (
+        A.to(device=device, non_blocking=True)
+        if isinstance(A, torch.Tensor)
+        else torch.tensor(A, dtype=torch.float32, device=device)
+    )
+
+    while A.ndim < target_dim:
+        A = A.unsqueeze(0)
+
+    return A
 
 
 def __fft_of_levelsets(
