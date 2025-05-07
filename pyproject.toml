@@ -18,12 +18,13 @@ classifiers = [
   "License :: OSI Approved :: MIT License",
   "Intended Audience :: Science/Research",
   "Intended Audience :: Education",
-  "Topic :: Utilities",
-  "Topic :: Scientific/Engineering :: Image Recognition",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Scientific/Engineering :: Image Processing",
   "Operating System :: OS Independent",
   "Natural Language :: English",
 ]
 
+# TODO: Pin minimum dependencies.
 dependencies = [
   "numpy",
   "torch",
@@ -47,7 +48,7 @@ default-groups = ["dev", "test", "lint"]
 
 [dependency-groups]
 dev = [
-    "typing-extensions>=4.13.2",
+  "typing-extensions>=4.13.2",
 ]
 test = [
   "hypothesis==6.131.10",
