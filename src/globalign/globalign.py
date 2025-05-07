@@ -256,6 +256,7 @@ def align_rigid(
     ext_ashape = np.array(a_tensor.shape, dtype=int)
     ext_bshape = np.array(b_tensor.shape, dtype=int)
     ext_shape = tuple(ext_ashape - ext_bshape + 1)
+    ext_indices = [slice(None, ext_shape[i]) for i in range(3)]
     batch_shape = tuple(ext_shape + np.array([packing - 1, 0, 0]))
     y, x = ext_ashape[-2:] - ext_bshape[-2:]
     out_shape = (0, x, 0, y, 0, 0)
@@ -286,7 +287,9 @@ def align_rigid(
         b_rotated = F.pad(b_rotated, out_shape, mode="constant", value=Q_B + 1)
 
         mb_fft = torch.conj(torch.fft.rfft2(mb_rotated))
-        n = torch.clamp(corr_apply(ma_fft, mb_fft, ext_shape), min=EPS)
+
+        c = torch.fft.irfft2(ma_fft * mb_fft)[ext_indices]
+        n = torch.clamp(torch.round(c), min=EPS)
 
         b_ffts = __fft_of_levelsets(b_rotated, Q_B, packing)
 
