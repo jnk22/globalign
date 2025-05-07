@@ -43,11 +43,18 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 managed = true
-default-groups = ["dev", "lint"]
+default-groups = ["dev", "test", "lint"]
 
 [dependency-groups]
 dev = [
     "typing-extensions>=4.13.2",
+]
+test = [
+  "hypothesis==6.131.10",
+  "pytest==8.3.5",
+  "pytest-cov==6.1.1",
+  "pytest-xdist==3.6.1",
+  "tox-uv==1.25.0",
 ]
 lint = [
   "ruff==0.11.7",
@@ -83,6 +90,39 @@ strict = true
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["D104", "F401"]
+"tests/*.py" = ["INP001", "S101"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov-config=pyproject.toml --doctest-modules --strict-markers"
+
+[tool.coverage.report]
+exclude_lines = ["if (typing\\.)?TYPE_CHECKING:"]
+
+[tool.coverage.run]
+branch = true
+source = ["src"]
+
+[tool.tox]
+skipsdist = true
+env_list = ["3.10", "3.11", "3.12", "3.13"]
+
+[tool.tox.env_run_base]
+passenv = ["PYTHON_VERSION"]
+allowlist_externals = ["uv"]
+commands = [
+  [
+    "uv",
+    "run",
+    "--no-dev",
+    "--group",
+    "test",
+    "--python",
+    "{envpython}",
+    "pytest",
+    "--doctest-modules",
+  ],
+]
 
 [tool.mypy]
 ignore_missing_imports = true

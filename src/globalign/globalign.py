@@ -30,6 +30,12 @@ HEADER: Final = " [MI]   [angle]  [dx] [dy] "
 
 # Creates a list of random angles
 def grid_angles(center: float, radius: float, n: int = 32) -> list[float]:
+    if radius < 0:
+        msg = "radius must be >= 0"
+        raise ValueError(msg)
+    if n < 1:
+        return []
+
     offsets = np.linspace(-radius, radius, num=n, endpoint=radius < 180)
 
     return (center + offsets).tolist()
@@ -44,13 +50,25 @@ def random_angles(
     n: int = 32,
     rng: Generator | None = None,
 ) -> list[float]:
-    if not isinstance(centers, list):
-        centers = [centers]
+    if radius < 0:
+        msg = "radius must be >= 0"
+        raise ValueError(msg)
+    if n < 1:
+        return []
+
+    centers_vector = np.atleast_1d(centers)
+
+    if center_prob is not None:
+        if len(center_prob) != len(centers_vector):
+            msg = "centers and center_prob must have same size"
+            raise ValueError(msg)
+
+        p = center_prob / np.sum(center_prob)
+    else:
+        p = None
 
     rng = rng or np.random.default_rng()
-    p = center_prob / np.sum(center_prob) if center_prob is not None else None
-
-    sampled_centers = rng.choice(np.asarray(centers), size=n, p=p)
+    sampled_centers = rng.choice(centers_vector, size=n, p=p)
     noise = rng.uniform(-radius, radius, size=n)
 
     return (sampled_centers + noise).tolist()
@@ -456,6 +474,7 @@ def __entropy(
 ) -> torch.Tensor:
     c = torch.fft.irfft2(a * b)[: shape[0], : shape[1], : shape[2]]
     p = (torch.round(c) if do_rounding else c) / n
+
     return p * torch.log2(torch.clamp(p, min=EPS))
 
 
