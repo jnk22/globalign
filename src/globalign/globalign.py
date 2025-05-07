@@ -136,7 +136,7 @@ def tf_rotate(
     I: torch.Tensor, angle: float, fill_value: int, center: NDArray | None = None
 ) -> torch.Tensor:
     # Half a pixel offset, since TF.rotate origin is in upper left corner.
-    center_fixed = [round(x + 0.5) for x in center] if center is not None else center
+    center_fixed = (center + 0.5).tolist() if center is not None else center
 
     return TF.rotate(I, -angle, center=center_fixed, fill=[fill_value])
 
@@ -263,8 +263,9 @@ def align_rigid(
     out_shape = (0, x, 0, y, 0, 0)
     device = a_tensor.device
 
-    # use default center of rotation (which is the center point)
-    center = transformations.image_center_point(B)
+    # Use default center of rotation (which is the center point) with
+    # half a pixel offset, since TF.rotate origin is in upper left corner.
+    center = (transformations.image_center_point(B) + 0.5).tolist()
 
     ma_fft = torch.fft.rfft2(M_A)
     arange = torch.arange(0, Q_A, device=device, dtype=a_tensor.dtype)
@@ -279,8 +280,8 @@ def align_rigid(
     maps: list[NDArray] | None = [] if save_maps else None
 
     for angle in angles:
-        mb_rotated = tf_rotate(M_B, angle, 0, center=center)
-        b_rotated = tf_rotate(b_tensor, angle, Q_B, center=center)
+        mb_rotated = TF.rotate(b_tensor, -angle, center=center, fill=[0])
+        b_rotated = TF.rotate(b_tensor, -angle, center=center, fill=[Q_B])
         b_rotated = torch.round(mb_rotated * b_rotated + (1 - mb_rotated) * (Q_B + 1))
 
         mb_rotated = F.pad(mb_rotated, out_shape, mode="constant", value=0)
