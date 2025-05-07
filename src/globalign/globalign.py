@@ -23,9 +23,9 @@ if TYPE_CHECKING:
 
     from transformations.transformations import CompositeTransform
 
-EPS: Final = 1e-7
-SEPARATOR: Final = "-" * 30
-HEADER: Final = " [MI]   [angle]  [dx] [dy] "
+__EPS: Final = 1e-7
+__SEPARATOR: Final = "-" * 30
+__HEADER: Final = " [MI]   [angle]  [dx] [dy] "
 
 
 def align_rigid_and_refine(
@@ -288,7 +288,7 @@ def align_rigid(
         mb_fft = torch.conj(torch.fft.rfft2(mb_rotated))
 
         c = torch.fft.irfft2(ma_fft * mb_fft)[ext_indices]
-        n = torch.clamp(torch.round(c), min=EPS)
+        n = torch.clamp(torch.round(c), min=__EPS)
 
         b_ffts = __fft_of_levelsets(b_rotated, Q_B, packing)
 
@@ -302,7 +302,7 @@ def align_rigid(
                 mi += torch.sum(__entropy(a_fft, b_fft, n, shape=batch_shape), dim=0)
 
         if h_ab is not None:
-            mi = F.relu(mi / (h_ab + EPS) - 1)
+            mi = F.relu(mi / (h_ab + __EPS) - 1)
 
         if maps is not None:
             maps.append(mi.cpu().numpy())
@@ -326,7 +326,7 @@ def align_rigid(
 
     results = sorted(results, key=(lambda res: res[0]), reverse=True)
     lines = (f"{mi:.4f} {ang:8.3f} {dx:4d} {dy:4d}" for mi, ang, dx, dy, *_ in results)
-    print("\n".join([SEPARATOR, HEADER, *lines, SEPARATOR]))
+    print("\n".join([__SEPARATOR, __HEADER, *lines, __SEPARATOR]))
 
     return results, maps
 
@@ -650,7 +650,7 @@ def __entropy(
     c = torch.fft.irfft2(a * b)[: shape[0], : shape[1], : shape[2]]
     p = (torch.round(c) if do_rounding else c) / n
 
-    return p * torch.log2(torch.clamp(p, min=EPS))
+    return p * torch.log2(torch.clamp(p, min=__EPS))
 
 
 def __create_transformation(param: NDArray, *, inv: bool = False) -> CompositeTransform:
