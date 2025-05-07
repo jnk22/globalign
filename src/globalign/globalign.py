@@ -244,7 +244,7 @@ def align_rigid(
 
     # Pad for overlap
     if enable_partial_overlap:
-        pad_y, pad_x = np.round(np.array(B.shape[-2:]) * (1 - overlap)).astype(int)
+        pad_y, pad_x = np.round(np.array(B.shape) * (1 - overlap)).astype(int)
         pad = (pad_x, pad_x, pad_y, pad_y)
 
         a_tensor = F.pad(a_tensor, pad, mode="constant", value=Q_A + 1)
@@ -252,13 +252,11 @@ def align_rigid(
     else:
         pad_y, pad_x = (0, 0)
 
-    ext_ashape = np.array(a_tensor.shape, dtype=int)
-    ext_bshape = np.array(b_tensor.shape, dtype=int)
-    ext_shape = tuple(ext_ashape - ext_bshape + 1)
+    shape_diff = np.array(a_tensor.shape) - np.array(b_tensor.shape)
+    out_shape = (0, shape_diff[2], 0, shape_diff[1], 0, 0)
+    ext_shape = tuple(shape_diff + 1)
     ext_indices = [slice(None, ext_shape[i]) for i in range(3)]
-    batch_shape = tuple(ext_shape + np.array([packing - 1, 0, 0]))
-    y, x = ext_ashape[-2:] - ext_bshape[-2:]
-    out_shape = (0, x, 0, y, 0, 0)
+    batch_shape = (packing, *ext_shape[1:])
     device = a_tensor.device
 
     # Use default center of rotation (which is the center point) with
@@ -267,9 +265,8 @@ def align_rigid(
     rotation_center = (center + 0.5).tolist()
 
     ma_fft = torch.fft.rfft2(M_A)
-    arange = torch.arange(0, Q_A, device=device, dtype=a_tensor.dtype)
-    shape = (1,) * a_tensor.ndim
-    a_ffts = torch.fft.rfft2(F.relu(1 - torch.abs(a_tensor - arange.view(Q_A, *shape))))
+    arange = torch.arange(0, Q_A, device=device, dtype=a_tensor.dtype).view(Q_A, 1, 1)
+    a_ffts = torch.fft.rfft2(F.relu(1 - torch.abs(a_tensor - arange)))
 
     dtype = torch.float32
     mi = torch.zeros(ext_shape, dtype=dtype, device=device)
@@ -621,9 +618,7 @@ def to_tensor(
 def __fft_of_levelsets(
     a: torch.Tensor, q: int, packing: int
 ) -> Generator[torch.Tensor, None, None]:
-    shape = (1,) * (a.ndim - 1)
-    arange = torch.arange(0, q, device=a.device, dtype=a.dtype).view(q, *shape)
-
+    arange = torch.arange(0, q, device=a.device, dtype=a.dtype).view(q, 1, 1)
     levelsets_all = F.relu(1 - torch.abs(a - arange))
 
     return (
