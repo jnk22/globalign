@@ -12,11 +12,13 @@ import torch
 import torch.fft
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
+from array_api_compat import get_namespace, is_cupy_namespace, is_torch_namespace
 
 import transformations
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
+    from types import ModuleType
 
     from numpy.random import Generator as RandomGenerator
     from numpy.typing import NDArray
@@ -31,8 +33,8 @@ __HEADER: Final = " [MI]   [angle]  [dx] [dy] "
 def align_rigid_and_refine(
     A: NDArray,
     B: NDArray,
-    M_A: NDArray | torch.Tensor | None,
-    M_B: NDArray | torch.Tensor | None,
+    M_A: NDArray | None,
+    M_B: NDArray | None,
     Q_A: int,
     Q_B: int,
     angles_n: int,
@@ -41,7 +43,6 @@ def align_rigid_and_refine(
     overlap: float = 0.5,
     enable_partial_overlap: bool = True,
     normalize_mi: bool = False,
-    on_gpu: bool = True,
     save_maps: bool = False,
     rng: RandomGenerator | None = None,
     packing: int | None = None,
@@ -112,7 +113,6 @@ def align_rigid_and_refine(
         "overlap": overlap,
         "enable_partial_overlap": enable_partial_overlap,
         "normalize_mi": normalize_mi,
-        "on_gpu": on_gpu,
         "save_maps": save_maps,
         "packing": packing,
     }
@@ -144,8 +144,8 @@ def align_rigid_and_refine(
 def align_rigid(
     A: NDArray,
     B: NDArray,
-    M_A: NDArray | torch.Tensor | None,
-    M_B: NDArray | torch.Tensor | None,
+    M_A: NDArray | None,
+    M_B: NDArray | None,
     Q_A: int,
     Q_B: int,
     angles: list[float],
@@ -153,7 +153,6 @@ def align_rigid(
     enable_partial_overlap: bool = True,
     normalize_mi: bool = False,
     packing: int | None = None,
-    on_gpu: bool = True,
     save_maps: bool = False,
 ) -> tuple[list, list[NDArray] | None]:
     """Align two 2D images using exhaustive search based on mutual information (MI).
@@ -214,10 +213,9 @@ def align_rigid(
     `scipy.ndimage.interpolation.map_coordinates`, which assumes integer
     coordinate-centered pixels.
     """
-    device = "cuda" if on_gpu else "cpu"
-
-    a_tensor = __to_tensor(A, device=device)
-    b_tensor = __to_tensor(B, device=device)
+    xp = get_namespace(A, B)
+    a_tensor = xp.reshape(A, (1, *A.shape))
+    b_tensor = xp.reshape(B, (1, *B.shape))
 
     if packing is None:
         # Use default packing to reduce memory usage.
@@ -234,99 +232,141 @@ def align_rigid(
         packing = max(min(Q_B, packing), 0)
 
     # Create all constant masks if not provided
+    device = A.device
     if M_A is None:
-        M_A = torch.ones_like(a_tensor)
+        M_A = xp.ones_like(a_tensor, device=device, dtype=xp.float32)
     else:
-        M_A = __to_tensor(M_A, device=device)
-        a_tensor = torch.round(M_A * a_tensor + (1 - M_A) * (Q_A + 1))
+        M_A = xp.astype(xp.reshape(M_A, (1, *M_A.shape)), xp.float32)
+        a_tensor = xp.round(M_A * a_tensor + (1 - M_A) * (Q_A + 1))
 
-    M_B = torch.ones_like(b_tensor) if M_B is None else __to_tensor(M_B, device=device)
+    if M_B is None:
+        M_B = xp.ones_like(b_tensor, device=device, dtype=xp.float32)
+    else:
+        M_B = xp.astype(xp.reshape(M_B, (1, *M_B.shape)), xp.float32)
+
+    # TODO: Enusre that x/y are correct.
 
     # Pad for overlap
     if enable_partial_overlap:
         pad_y, pad_x = np.round(np.array(B.shape) * (1 - overlap)).astype(int)
-        pad = (pad_x, pad_x, pad_y, pad_y)
+        padded_shape = (1, a_tensor.shape[2] + 2 * pad_x, a_tensor.shape[1] + 2 * pad_y)
+        overlap_pad_indices = (..., slice(pad_x, -pad_x), slice(pad_y, -pad_y))
 
-        a_tensor = F.pad(a_tensor, pad, mode="constant", value=Q_A + 1)
-        M_A = F.pad(M_A, pad, mode="constant", value=0)
+        a_tensor_new = xp.full(padded_shape, Q_A + 1, device=device)
+        a_tensor_new[overlap_pad_indices] = a_tensor
+        a_tensor = a_tensor_new
+
+        M_A_new = xp.zeros(padded_shape, device=device)
+        M_A_new[overlap_pad_indices] = M_A
+        M_A = M_A_new
+
     else:
         pad_y, pad_x = (0, 0)
+        padded_shape = (1, a_tensor.shape[2], a_tensor.shape[1])
 
     shape_diff = np.array(a_tensor.shape) - np.array(b_tensor.shape)
-    out_shape = (0, shape_diff[2], 0, shape_diff[1], 0, 0)
     ext_shape = tuple(shape_diff + 1)
-    ext_indices = [slice(None, ext_shape[i]) for i in range(3)]
-    batch_shape = (packing, *ext_shape[1:])
-    device = a_tensor.device
+    ext_indices = tuple(slice(None, ext_shape[i]) for i in range(3))
+    pad_indices = (..., slice(None, shape_diff[2]), slice(None, shape_diff[1]))
+    ent_shape = (packing, *ext_shape[1:])
 
     # Use default center of rotation (which is the center point) with
     # half a pixel offset, since TF.rotate origin is in upper left corner.
     center = transformations.image_center_point(B)
     rotation_center = (center + 0.5).tolist()
 
-    ma_fft = torch.fft.rfft2(M_A)
-    arange = torch.arange(0, Q_A, device=device, dtype=a_tensor.dtype).view(Q_A, 1, 1)
-    a_ffts = torch.fft.rfft2(F.relu(1 - torch.abs(a_tensor - arange)))
-
-    dtype = torch.float32
-    mi = torch.zeros(ext_shape, dtype=dtype, device=device)
-    h_ab = torch.zeros(ext_shape, dtype=dtype, device=device) if normalize_mi else None
+    ma_fft = xp.fft.rfft2(M_A)
+    arange = xp.reshape(
+        xp.arange(0, Q_A, device=device, dtype=a_tensor.dtype), (Q_A, 1, 1)
+    )
+    a_ffts = xp.fft.rfft2(xp.maximum(1 - xp.abs(a_tensor - arange), xp.asarray(0)))
 
     temp_results = []
     maps: list[NDArray] | None = [] if save_maps else None
 
+    b_rotated_pad = xp.full(padded_shape, Q_B + 1, device=device, dtype=xp.float32)
+    mb_rotated_pad = xp.zeros(padded_shape, device=device, dtype=xp.float32)
+
     for angle in angles:
-        mb_rotated = TF.rotate(M_B, -angle, center=rotation_center, fill=[0])
-        b_rotated = TF.rotate(b_tensor, -angle, center=rotation_center, fill=[Q_B])
-        b_rotated = torch.round(mb_rotated * b_rotated + (1 - mb_rotated) * (Q_B + 1))
+        mi = xp.zeros(ext_shape, dtype=xp.float32, device=device)
+        h_ab = (
+            xp.zeros(ext_shape, dtype=xp.float32, device=device)
+            if normalize_mi
+            else None
+        )
 
-        mb_rotated = F.pad(mb_rotated, out_shape, mode="constant", value=0)
-        b_rotated = F.pad(b_rotated, out_shape, mode="constant", value=Q_B + 1)
+        mb_rotated = __rotate(M_B, angle, center=rotation_center, cval=0, xp=xp)
+        b_rotated = __rotate(b_tensor, angle, center=rotation_center, cval=Q_B, xp=xp)
+        b_rotated = xp.round(mb_rotated * b_rotated + (1 - mb_rotated) * (Q_B + 1))
 
-        mb_fft = torch.conj(torch.fft.rfft2(mb_rotated))
+        b_rotated_pad[pad_indices] = b_rotated
+        b_rotated = b_rotated_pad
 
-        c = torch.fft.irfft2(ma_fft * mb_fft)[ext_indices]
-        n = torch.clamp(torch.round(c), min=__EPS)
+        mb_rotated_pad[pad_indices] = mb_rotated
+        mb_rotated = mb_rotated_pad
 
-        b_ffts = __fft_of_levelsets(b_rotated, Q_B, packing)
+        mb_fft = xp.conj(xp.fft.rfft2(mb_rotated))
+
+        c = xp.fft.irfft2(ma_fft * mb_fft)[ext_indices]
+
+        # PyTorch's 'clamp' function is much faster than its 'clip' function.
+        clip_func = xp.clamp if is_torch_namespace(xp) else xp.clip
+        n = clip_func(xp.round(c), min=__EPS)
+
+        b_ffts = __fft_of_levelsets(b_rotated, Q_B, packing, xp=xp)
 
         for i, b_fft in enumerate(b_ffts):
-            mi -= torch.sum(__entropy(ma_fft, b_fft, n, shape=batch_shape), dim=0)
+            mi -= xp.sum(__entropy(ma_fft, b_fft, n, shape=ent_shape, xp=xp), axis=0)
 
             for a_fft in a_ffts:
                 if i == 0:
-                    mi -= __entropy(a_fft, mb_fft, n, shape=ext_shape)
+                    mi -= __entropy(a_fft, mb_fft, n, shape=ext_shape, xp=xp)
 
-                mi += torch.sum(__entropy(a_fft, b_fft, n, shape=batch_shape), dim=0)
+                mi += xp.sum(__entropy(a_fft, b_fft, n, shape=ent_shape, xp=xp), axis=0)
 
         if h_ab is not None:
-            mi = F.relu(mi / (h_ab + __EPS) - 1)
+            mi = xp.maximum(mi / (h_ab + __EPS) - 1, xp.asarray(0))
 
         if maps is not None:
             maps.append(mi.cpu().numpy())
 
-        max_n, _ = torch.max(torch.reshape(n, (-1,)), 0)
-        mi[n < overlap * max_n] = 0.0
+        # Mask values in `mi` where n < overlap * max_n
+        max_n = xp.max(xp.reshape(n, (-1,)))
+        mask = xp.less(n, overlap * max_n)
+        mi = xp.where(mask, 0.0, mi)
 
-        mi_vec = torch.reshape(mi, (-1,))
-        temp_results.append((angle, *torch.max(mi_vec, -1)))
-
-        mi.zero_()
-        if h_ab is not None:
-            h_ab.zero_()
+        mi_vec = xp.reshape(mi, (-1,))
+        temp_results.append((angle, float(xp.max(mi_vec)), int(xp.argmax(mi_vec))))
 
     results = []
     for angle, mi, index in temp_results:
-        idx = index.cpu().numpy()
-        ty = -(idx // ext_shape[2] - pad_y)
-        tx = -(idx % ext_shape[2] - pad_x)
-        results.append((mi.cpu().numpy(), angle, ty, tx, center[1], center[0]))
+        ty = -(index // ext_shape[2] - pad_y)
+        ty = -(index // ext_shape[2] - pad_y)
+        tx = -(index % ext_shape[2] - pad_x)
+        results.append((mi, angle, ty, tx, center[1], center[0]))
 
     results = sorted(results, key=(lambda res: res[0]), reverse=True)
     lines = (f"{mi:.4f} {ang:8.3f} {dx:4d} {dy:4d}" for mi, ang, dx, dy, *_ in results)
     print("\n".join([__SEPARATOR, __HEADER, *lines, __SEPARATOR]))
 
     return results, maps
+
+
+def __rotate(
+    img: NDArray, angle: float, center: NDArray, cval: int, xp: ModuleType
+) -> NDArray:
+    if is_torch_namespace(xp):
+        import torchvision.transforms.functional as TF
+
+        return TF.rotate(img, -angle, center=list(center), fill=[cval])
+
+    if is_cupy_namespace(xp):
+        import cupyx.scipy.ndimage as ndi
+    else:
+        import scipy.ndimage as ndi
+
+    rotated = ndi.rotate(img[0], -angle, reshape=False, mode="nearest")
+    return xp.reshape(rotated, img.shape)
 
 
 def grid_angles(center: float, radius: float, n: int = 32) -> list[float]:
@@ -616,37 +656,33 @@ def to_tensor(
 
 
 def __fft_of_levelsets(
-    a: torch.Tensor, q: int, packing: int
-) -> Generator[torch.Tensor, None, None]:
-    arange = torch.arange(0, q, device=a.device, dtype=a.dtype).view(q, 1, 1)
-    levelsets_all = F.relu(1 - torch.abs(a - arange))
+    a: NDArray, q: int, packing: int, xp: ModuleType
+) -> Generator[NDArray, None, None]:
+    arange = xp.reshape(xp.arange(0, q, device=a.device, dtype=a.dtype), (q, 1, 1))
+    levelsets_all = xp.maximum(1 - xp.abs(a - arange), xp.asarray(0))
 
     return (
-        torch.conj(torch.fft.rfft2(levelsets_all[a_start : min(a_start + packing, q)]))
+        xp.conj(xp.fft.rfft2(levelsets_all[a_start : min(a_start + packing, q)]))
         for a_start in range(0, q, packing)
     )
 
 
-def __to_tensor(arr: torch.Tensor | NDArray, *, device: str) -> torch.Tensor:
-    return (
-        arr.to(device=device, non_blocking=True)
-        if isinstance(arr, torch.Tensor)
-        else torch.tensor(arr, dtype=torch.float32, device=device)
-    ).unsqueeze(0)
-
-
 def __entropy(
-    a: torch.Tensor,
-    b: torch.Tensor,
-    n: torch.Tensor,
+    a: NDArray,
+    b: NDArray,
+    n: NDArray,
     *,
     shape: tuple[int, ...],
     do_rounding: bool = True,
-) -> torch.Tensor:
-    c = torch.fft.irfft2(a * b)[: shape[0], : shape[1], : shape[2]]
-    p = (torch.round(c) if do_rounding else c) / n
+    xp: ModuleType,
+) -> NDArray:
+    c = xp.fft.irfft2(a * b)[: shape[0], : shape[1], : shape[2]]
+    p = (xp.round(c) if do_rounding else c) / n
 
-    return p * torch.log2(torch.clamp(p, min=__EPS))
+    # PyTorch's 'clamp' function is much faster than its 'clip' function.
+    clip_func = xp.clamp if is_torch_namespace(xp) else xp.clip
+
+    return p * xp.log2(clip_func(p, min=__EPS))
 
 
 def __create_transformation(param: NDArray, *, inv: bool = False) -> CompositeTransform:
